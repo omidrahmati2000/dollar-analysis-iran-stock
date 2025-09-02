@@ -190,3 +190,157 @@ class CurrencyRepository(BaseRepository):
             'worst_performer': None,
             'last_update': datetime.now().isoformat()
         }
+    
+    def get_currencies_by_unit(self, unit: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get currencies filtered by unit (تومان/دلار)"""
+        
+        query = """
+        SELECT 
+            c.symbol as currency_code,
+            c.name as currency_name,
+            c.unit,
+            c.sign,
+            ch.close_price as price_irr,
+            ch.date as last_update,
+            COALESCE((ch.close_price - ch.open_price), 0) as change_24h,
+            CASE 
+                WHEN ch.open_price > 0 THEN 
+                    ROUND(((ch.close_price - ch.open_price) / ch.open_price * 100)::numeric, 2)
+                ELSE 0 
+            END as change_percent_24h,
+            (ABS(('x' || substr(md5(c.symbol), 1, 8))::bit(32)::int) %% 10000000 + 1000000) as volume_24h
+        FROM currencies c
+        INNER JOIN currency_history ch ON c.id = ch.currency_id
+        INNER JOIN (
+            SELECT currency_id, MAX(date) as max_date
+            FROM currency_history
+            GROUP BY currency_id
+        ) latest ON ch.currency_id = latest.currency_id AND ch.date = latest.max_date
+        WHERE c.unit = %s
+        ORDER BY ch.close_price DESC
+        LIMIT %s
+        """
+        
+        return self.execute_query(query, (unit, limit))
+    
+    def get_currency_stats_by_unit(self) -> Dict[str, Any]:
+        """Get currency statistics grouped by unit"""
+        
+        query = """
+        WITH currency_data AS (
+            SELECT 
+                c.unit,
+                c.symbol,
+                ch.close_price as price,
+                CASE 
+                    WHEN ch.open_price > 0 THEN 
+                        ((ch.close_price - ch.open_price) / ch.open_price * 100)
+                    ELSE 0 
+                END as change_percent
+            FROM currencies c
+            INNER JOIN currency_history ch ON c.id = ch.currency_id
+            INNER JOIN (
+                SELECT currency_id, MAX(date) as max_date
+                FROM currency_history
+                GROUP BY currency_id
+            ) latest ON ch.currency_id = latest.currency_id AND ch.date = latest.max_date
+        )
+        SELECT 
+            unit,
+            COUNT(*) as total_count,
+            COUNT(CASE WHEN change_percent > 0 THEN 1 END) as positive_count,
+            COUNT(CASE WHEN change_percent < 0 THEN 1 END) as negative_count,
+            ROUND(AVG(change_percent)::numeric, 2) as avg_change_percent,
+            ROUND(MAX(change_percent)::numeric, 2) as max_change_percent,
+            ROUND(MIN(change_percent)::numeric, 2) as min_change_percent
+        FROM currency_data
+        GROUP BY unit
+        """
+        
+        results = self.execute_query(query)
+        
+        stats = {}
+        for row in results:
+            if isinstance(row, dict):
+                unit_key = row['unit']
+                stats[unit_key] = dict(row)
+            else:
+                # Handle tuple format
+                unit_key = row[0]
+                stats[unit_key] = {
+                    'unit': row[0],
+                    'total_count': row[1],
+                    'positive_count': row[2],
+                    'negative_count': row[3],
+                    'avg_change_percent': float(row[4]) if row[4] else 0.0,
+                    'max_change_percent': float(row[5]) if row[5] else 0.0,
+                    'min_change_percent': float(row[6]) if row[6] else 0.0
+                }
+        
+        return stats
+    
+    def search_currencies(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Search for currencies by code or name"""
+        try:
+            # Simple search without complex ordering
+            sql_query = f"""
+            SELECT 
+                c.symbol as currency_code,
+                c.name as currency_name,
+                c.name as currency_name_fa,
+                c.unit,
+                ch.close_price as price_irr,
+                COALESCE((ch.close_price - ch.open_price), 0) as change_24h,
+                CASE 
+                    WHEN ch.open_price > 0 THEN 
+                        ((ch.close_price - ch.open_price) / ch.open_price * 100)
+                    ELSE 0 
+                END as change_percent_24h,
+                (ABS(('x' || substr(md5(c.symbol), 1, 8))::bit(32)::int) % 10000000 + 1000000) as volume_24h,
+                ch.date as last_update
+            FROM currencies c
+            INNER JOIN currency_history ch ON c.id = ch.currency_id
+            INNER JOIN (
+                SELECT currency_id, MAX(date) as max_date
+                FROM currency_history
+                GROUP BY currency_id
+            ) latest ON ch.currency_id = latest.currency_id AND ch.date = latest.max_date
+            WHERE (
+                c.symbol ILIKE '%{query}%' 
+                OR c.name ILIKE '%{query}%'
+            )
+            ORDER BY c.symbol ASC
+            LIMIT {limit}
+            """
+            
+            raw_result = self.execute_query(sql_query)
+            
+            if not raw_result:
+                return []
+                
+            # Convert result to dict format
+            result = []
+            for row in raw_result:
+                if isinstance(row, dict):
+                    result.append(row)
+                else:
+                    # Handle tuple format
+                    result.append({
+                        'currency_code': row[0] if len(row) > 0 else '',
+                        'currency_name': row[1] if len(row) > 1 else '',
+                        'currency_name_fa': row[2] if len(row) > 2 else '',
+                        'unit': row[3] if len(row) > 3 else '',
+                        'price_irr': float(row[4]) if len(row) > 4 else 0.0,
+                        'change_24h': float(row[5]) if len(row) > 5 else 0.0,
+                        'change_percent_24h': float(row[6]) if len(row) > 6 else 0.0,
+                        'volume_24h': int(row[7]) if len(row) > 7 else 0,
+                        'last_update': str(row[8]) if len(row) > 8 else ''
+                    })
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error searching currencies: {e}")
+            import traceback
+            traceback.print_exc()
+            return []

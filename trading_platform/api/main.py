@@ -29,6 +29,18 @@ from trading_platform.api.services.indicator_service import IndicatorService
 # Get configuration
 config = get_config()
 
+# Custom JSON response class for proper UTF-8 encoding
+class UTF8JSONResponse(JSONResponse):
+    def render(self, content: Any) -> bytes:
+        import json
+        return json.dumps(
+            content,
+            ensure_ascii=False,  # Don't escape non-ASCII characters
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":")
+        ).encode("utf-8")
+
 # Initialize FastAPI app with Swagger documentation
 app = FastAPI(
     title=config.API_TITLE,
@@ -36,16 +48,17 @@ app = FastAPI(
     version=config.API_VERSION,
     docs_url="/docs",
     redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    openapi_url="/openapi.json",
+    default_response_class=UTF8JSONResponse  # Use UTF-8 JSON responses
 )
 
-# Configure CORS
+# Configure CORS for frontend integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.CORS_ORIGINS,
-    allow_credentials=config.CORS_ALLOW_CREDENTIALS,
-    allow_methods=config.CORS_ALLOW_METHODS,
-    allow_headers=config.CORS_ALLOW_HEADERS,
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "*"],  # Allow frontend
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 # Initialize repositories
@@ -241,6 +254,22 @@ async def get_stocks(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/v2/stocks/search",
+         tags=["Stocks"],
+         summary="Search stocks",
+         description="Search for stocks by symbol or company name")
+async def search_stocks(
+    q: str = Query(..., min_length=2, description="Search query"),
+    limit: int = Query(10, ge=1, le=50, description="Maximum results")
+):
+    """Search for stocks"""
+    try:
+        results = stock_service.search_symbols(q, limit)
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/v2/stocks/{symbol}",
          response_model=StockResponse,
          tags=["Stocks"],
@@ -265,31 +294,26 @@ async def get_stock_details(
          response_model=List[OHLCVResponse],
          tags=["Stocks"],
          summary="Get OHLCV data",
-         description="Retrieve OHLCV (Open, High, Low, Close, Volume) data for a stock")
+         description="Retrieve OHLCV (Open, High, Low, Close, Volume) data for a stock with timeframe support")
 async def get_ohlcv_data(
     symbol: str = Path(..., description="Stock symbol"),
-    days: int = Query(30, ge=1, le=365, description="Number of days of data")
+    days: int = Query(30, ge=1, le=365, description="Number of days of data (fallback when no date range specified)"),
+    timeframe: str = Query("1d", description="Timeframe: 1d (daily), 1w (weekly), 1m (monthly), 1y (yearly)"),
+    from_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD format)"),
+    to_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD format)"),
+    limit: Optional[int] = Query(None, ge=1, le=10000, description="Maximum number of data points to return")
 ):
-    """Get OHLCV data for a stock"""
+    """Get OHLCV data for a stock with timeframe and pagination support"""
     try:
-        ohlcv = stock_service.get_ohlcv(symbol, days)
+        ohlcv = stock_service.get_ohlcv(
+            symbol=symbol, 
+            days=days, 
+            timeframe=timeframe,
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit
+        )
         return ohlcv
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/v2/stocks/search/{query}",
-         tags=["Stocks"],
-         summary="Search stocks",
-         description="Search for stocks by symbol or company name")
-async def search_stocks(
-    query: str = Path(..., min_length=2, description="Search query"),
-    limit: int = Query(10, ge=1, le=50, description="Maximum results")
-):
-    """Search for stocks"""
-    try:
-        results = stock_service.search_symbols(query, limit)
-        return {"results": results, "count": len(results)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -309,6 +333,22 @@ async def get_currencies(
     try:
         currencies = currency_service.get_currencies(limit, currency_filter)
         return currencies
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v2/currencies/search",
+         tags=["Currencies"],
+         summary="Search currencies",
+         description="Search for currencies by code or name")
+async def search_currencies(
+    q: str = Query(..., min_length=2, description="Search query"),
+    limit: int = Query(10, ge=1, le=50, description="Maximum results")
+):
+    """Search for currencies"""
+    try:
+        results = currency_service.search_currencies(q, limit)
+        return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -429,6 +469,82 @@ async def get_currency_statistics():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/v2/market/stats",
+         tags=["Market"],
+         summary="Get accurate market statistics",
+         description="Retrieve accurate market statistics including stock counts")
+async def get_market_stats():
+    """Get accurate market statistics"""
+    try:
+        stats = stock_service.get_market_stats()
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v2/market/industry-groups",
+         tags=["Market"],
+         summary="Get industry groups analysis", 
+         description="Retrieve industry groups with performance analysis")
+async def get_industry_groups_analysis(
+    price_type: int = Query(3, description="Price type: 2=unadjusted, 3=adjusted"),
+    sort_by: str = Query("performance", description="Sort by: performance, total_stocks, positive_ratio")
+):
+    """Get industry groups analysis"""
+    try:
+        groups = stock_service.get_industry_groups_analysis(price_type)
+        
+        # Apply sorting
+        if sort_by == "performance":
+            groups.sort(key=lambda x: x.get('avg_change_percent', 0), reverse=True)
+        elif sort_by == "total_stocks":
+            groups.sort(key=lambda x: x.get('total_stocks', 0), reverse=True)
+        elif sort_by == "positive_ratio":
+            groups.sort(key=lambda x: x.get('positive_ratio', 0), reverse=True)
+        
+        return {
+            "groups": groups,
+            "price_type": price_type,
+            "price_type_description": "Adjusted" if price_type == 3 else "Unadjusted",
+            "total_groups": len(groups),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v2/market/industry-groups/{industry_group}/stocks",
+         tags=["Market"],
+         summary="Get stocks by industry group",
+         description="Retrieve stocks filtered by industry group with performance data")
+async def get_stocks_by_industry(
+    industry_group: str = Path(..., description="Industry group name"),
+    price_type: int = Query(3, description="Price type: 2=unadjusted, 3=adjusted"),
+    sort_by: str = Query("performance", description="Sort by: performance, price, volume, market_value, symbol, name"),
+    limit: int = Query(50, ge=1, le=200, description="Number of results to return")
+):
+    """Get stocks by industry group"""
+    try:
+        stocks = stock_service.get_stocks_by_industry(
+            industry_group=industry_group,
+            price_type=price_type,
+            sort_by=sort_by,
+            limit=limit
+        )
+        
+        return {
+            "stocks": stocks,
+            "industry_group": industry_group,
+            "price_type": price_type,
+            "price_type_description": "Adjusted" if price_type == 3 else "Unadjusted",
+            "total_stocks": len(stocks),
+            "sort_by": sort_by,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============== Error Handlers ==============
 
 @app.exception_handler(404)
@@ -477,6 +593,26 @@ async def debug_currency_repository():
     try:
         # Test currency repository query directly
         result = currency_repository.get_currencies(limit=3)
+        return {
+            "status": "success",
+            "count": len(result),
+            "data": result,
+            "type": str(type(result))
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error", 
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+@app.get("/debug/industry-groups", tags=["Debug"])
+async def debug_industry_groups():
+    """Test industry groups analysis directly"""
+    try:
+        # Test industry groups repository directly
+        result = stock_repository.get_industry_groups_analysis(3)
         return {
             "status": "success",
             "count": len(result),

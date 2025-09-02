@@ -18,7 +18,7 @@ class WebPlatformConfig(BaseSettings):
     DB_PORT: int = 5432
     DB_NAME: str = "iran_market_data"
     DB_USER: str = "postgres"
-    DB_PASSWORD: str = "postgres123"
+    DB_PASSWORD: str = os.getenv("DB_PASSWORD", "postgres")
     
     # Security settings - IMPORTANT: Set this in environment variables
     SECRET_KEY: str = os.getenv("SECRET_KEY", "CHANGE-THIS-IN-PRODUCTION")

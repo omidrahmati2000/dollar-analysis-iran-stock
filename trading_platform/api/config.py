@@ -14,7 +14,7 @@ class Config:
         'port': int(os.getenv('DB_PORT', 5432)),
         'database': os.getenv('DB_NAME', 'iran_market_data'),
         'user': os.getenv('DB_USER', 'postgres'),
-        'password': os.getenv('DB_PASSWORD', 'postgres123')
+        'password': os.getenv('DB_PASSWORD', 'postgres')
     }
     
     # API configuration
@@ -90,7 +90,7 @@ class TestingConfig(Config):
         'port': 5432,
         'database': 'iran_market_test',
         'user': 'postgres',
-        'password': 'postgres123'
+        'password': os.getenv('TEST_DB_PASSWORD', 'postgres')
     }
 
 

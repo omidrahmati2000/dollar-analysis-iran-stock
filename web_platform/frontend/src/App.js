@@ -8,12 +8,15 @@ import { QueryClient, QueryClientProvider } from 'react-query';
 import Header from './components/Header/Header';
 import Sidebar from './components/Sidebar/Sidebar';
 import Dashboard from './pages/Dashboard/Dashboard';
-import Charts from './pages/Charts/Charts';
+import Charts from './pages/Charts/ChartsNew';
 import Screener from './pages/Screener/Screener';
 import Portfolio from './pages/Portfolio/Portfolio';
 import Watchlist from './pages/Watchlist/Watchlist';
 import Settings from './pages/Settings/Settings';
 import Login from './pages/Auth/Login';
+import ChartDemo from './components/Charts/ChartDemo';
+import IndustryAnalysis from './pages/IndustryAnalysis/IndustryAnalysis';
+import Currencies from './pages/Currencies/Currencies';
 
 // Services
 import { AuthProvider, useAuth } from './services/auth';
@@ -77,12 +80,9 @@ const darkTheme = createTheme({
 });
 
 function AppContent() {
-  const { isAuthenticated } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  if (!isAuthenticated) {
-    return <Login />;
-  }
+  // Free platform - no authentication required
 
   return (
     <Box sx={{ display: 'flex', height: '100vh' }}>
@@ -105,9 +105,12 @@ function AppContent() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/charts" element={<Charts />} />
           <Route path="/charts/:symbol" element={<Charts />} />
+          <Route path="/demo" element={<ChartDemo />} />
           <Route path="/screener" element={<Screener />} />
           <Route path="/portfolio" element={<Portfolio />} />
           <Route path="/watchlist" element={<Watchlist />} />
+          <Route path="/industry-analysis" element={<IndustryAnalysis />} />
+          <Route path="/currencies" element={<Currencies />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Box>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Grid,
@@ -12,9 +12,10 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  LinearProgress,
   IconButton,
-  Tooltip
+  Tooltip,
+  CircularProgress,
+  Alert
 } from '@mui/material';
 import {
   TrendingUp as TrendingUpIcon,
@@ -22,34 +23,67 @@ import {
   ShowChart as ChartIcon,
   Refresh as RefreshIcon
 } from '@mui/icons-material';
-import { useQuery } from 'react-query';
 import { useNavigate } from 'react-router-dom';
-import { useWebSocket } from '../../services/websocket';
-import { apiService } from '../../services/api';
-import numeral from 'numeral';
+import stockRepository from '../../services/repositories/StockRepository';
+import CurrencyWidget from '../../components/Dashboard/CurrencyWidget';
+import LoadingSpinner, { LoadingCard } from '../../components/Loading/LoadingSpinner';
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { prices, connectionStatus } = useWebSocket();
+  const [marketSummary, setMarketSummary] = useState(null);
+  const [topStocks, setTopStocks] = useState([]);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [lastUpdate, setLastUpdate] = useState(null);
 
-  // Fetch market summary
-  const { data: marketSummary, isLoading: summaryLoading, refetch } = useQuery(
-    'marketSummary',
-    apiService.getMarketSummary,
-    {
-      refetchInterval: 30000, // Refetch every 30 seconds
-      onError: (error) => {
-        console.error('Failed to fetch market summary:', error);
-      }
+  // Fetch market data
+  const fetchMarketData = async () => {
+    try {
+      setSummaryLoading(true);
+      
+      // Fetch market summary, market stats, and top stocks
+      const [summary, stats, stocks] = await Promise.all([
+        fetch('http://localhost:8000/api/v2/market/summary').then(res => res.ok ? res.json() : null),
+        fetch('http://localhost:8000/api/v2/market/stats').then(res => res.ok ? res.json() : null),
+        stockRepository.getAllStocks(50) // Get top 50 stocks
+      ]);
+      
+      // Merge summary and stats data
+      const combinedSummary = {
+        ...summary,
+        ...stats,
+        currencies: 0 // Will be updated when currency API is available
+      };
+      
+      setMarketSummary(combinedSummary);
+      setTopStocks(stocks || []);
+      setLastUpdate(new Date());
+      setError(null);
+    } catch (err) {
+      console.error('Failed to fetch market data:', err);
+      setError(err.message);
+    } finally {
+      setSummaryLoading(false);
     }
-  );
+  };
+
+  // Initial load and auto-refresh
+  useEffect(() => {
+    fetchMarketData();
+    
+    const interval = setInterval(fetchMarketData, 30000); // Refresh every 30 seconds
+    return () => clearInterval(interval);
+  }, []);
 
   const formatPrice = (price) => {
-    return numeral(price).format('0,0');
+    if (price === null || price === undefined) return '—';
+    return new Intl.NumberFormat('en-US').format(price);
   };
 
   const formatPercent = (percent) => {
-    return numeral(percent / 100).format('+0.00%');
+    if (percent === null || percent === undefined) return '—';
+    const sign = percent >= 0 ? '+' : '';
+    return `${sign}${percent.toFixed(2)}%`;
   };
 
   const getChangeColor = (change) => {
@@ -64,166 +98,154 @@ const Dashboard = () => {
     return null;
   };
 
-  const handleSymbolClick = (symbol) => {
-    navigate(`/charts/${symbol}`);
-  };
-
-  if (summaryLoading) {
+  if (summaryLoading && !marketSummary && !topStocks.length) {
     return (
-      <Box sx={{ p: 3 }}>
-        <LinearProgress />
-        <Typography sx={{ mt: 2 }} color="text.secondary">
-          Loading market data...
-        </Typography>
+      <Box sx={{ height: '100%', p: 3 }}>
+        <LoadingSpinner 
+          type="pulse" 
+          message="در حال بارگذاری داده‌های بازار..." 
+          size="large"
+        />
+        <Grid container spacing={3} sx={{ mt: 2 }}>
+          <Grid item xs={12} sm={6} md={3}>
+            <LoadingCard height={120} />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <LoadingCard height={120} />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <LoadingCard height={120} />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <LoadingCard height={120} />
+          </Grid>
+          <Grid item xs={12}>
+            <LoadingCard height={200} />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <LoadingCard height={300} />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <LoadingCard height={300} />
+          </Grid>
+        </Grid>
+      </Box>
+    );
+  }
+
+  if (error && !topStocks.length) {
+    return (
+      <Box sx={{ height: '100%', p: 3 }}>
+        <Alert 
+          severity="error" 
+          action={
+            <IconButton onClick={fetchMarketData} size="small">
+              <RefreshIcon />
+            </IconButton>
+          }
+        >
+          Failed to load market data: {error}
+        </Alert>
       </Box>
     );
   }
 
   return (
-    <Box sx={{ p: 3, height: '100%', overflow: 'auto' }}>
+    <Box sx={{ height: '100%', overflow: 'auto', p: 3 }}>
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Box>
-          <Typography variant="h4" fontWeight="bold" gutterBottom>
-            Market Dashboard
+        <Typography variant="h4" fontWeight="bold">
+          Market Dashboard
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Chip
+            label={error ? 'Error' : 'Connected'}
+            color={error ? 'error' : 'success'}
+            size="small"
+          />
+          <Typography variant="body2" color="text.secondary">
+            {lastUpdate ? `Last updated: ${lastUpdate.toLocaleTimeString()}` : 'Never'}
           </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Chip
-              icon={<div className={`status-indicator ${connectionStatus.isConnected ? 'connected' : 'disconnected'}`} />}
-              label={connectionStatus.isConnected ? 'Live Data' : 'Disconnected'}
-              color={connectionStatus.isConnected ? 'success' : 'error'}
-              size="small"
-            />
-            <Typography variant="body2" color="text.secondary">
-              Last updated: {new Date().toLocaleTimeString()}
-            </Typography>
-          </Box>
+          <Tooltip title="Refresh Data">
+            <IconButton onClick={fetchMarketData} disabled={summaryLoading}>
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
         </Box>
-        
-        <Tooltip title="Refresh Data">
-          <IconButton onClick={refetch} color="primary">
-            <RefreshIcon />
-          </IconButton>
-        </Tooltip>
       </Box>
 
-      <Grid container spacing={3}>
-        {/* Market Overview Cards */}
-        <Grid item xs={12} md={8}>
-          <Grid container spacing={2}>
-            <Grid item xs={6} md={3}>
-              <Card>
-                <CardContent>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Total Stocks
-                  </Typography>
-                  <Typography variant="h4" fontWeight="bold">
-                    {marketSummary?.total_stocks || 0}
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            
-            <Grid item xs={6} md={3}>
-              <Card>
-                <CardContent>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Currencies
-                  </Typography>
-                  <Typography variant="h4" fontWeight="bold">
-                    {marketSummary?.total_currencies || 0}
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            
-            <Grid item xs={6} md={3}>
-              <Card>
-                <CardContent>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Market Status
-                  </Typography>
-                  <Chip
-                    label={marketSummary?.market_status === 'open' ? 'OPEN' : 'CLOSED'}
-                    color={marketSummary?.market_status === 'open' ? 'success' : 'error'}
-                    size="small"
-                    sx={{ mt: 1 }}
-                  />
-                </CardContent>
-              </Card>
-            </Grid>
-            
-            <Grid item xs={6} md={3}>
-              <Card>
-                <CardContent>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Active Symbols
-                  </Typography>
-                  <Typography variant="h4" fontWeight="bold">
-                    {connectionStatus.subscriptions.length}
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-        </Grid>
-
-        {/* Real-time Prices */}
-        <Grid item xs={12} md={4}>
+      {/* Market Summary Cards */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Live Prices
+              <Typography color="text.secondary" gutterBottom>
+                Total Stocks
               </Typography>
-              {Object.entries(prices).slice(0, 5).map(([symbol, priceData]) => (
-                <Box
-                  key={symbol}
-                  onClick={() => handleSymbolClick(symbol)}
-                  sx={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    py: 1,
-                    cursor: 'pointer',
-                    '&:hover': { bgcolor: 'action.hover' },
-                    borderRadius: 1,
-                    px: 1
-                  }}
-                >
-                  <Typography variant="body2" fontWeight="bold">
-                    {symbol}
-                  </Typography>
-                  <Box sx={{ textAlign: 'right' }}>
-                    <Typography
-                      variant="body2"
-                      color={getChangeColor(priceData.change)}
-                      fontWeight="bold"
-                    >
-                      {formatPrice(priceData.price)}
-                    </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', color: getChangeColor(priceData.change) }}>
-                      {getChangeIcon(priceData.change)}
-                      <Typography variant="caption">
-                        {formatPercent(priceData.change_percent)}
-                      </Typography>
-                    </Box>
-                  </Box>
-                </Box>
-              ))}
-              {Object.keys(prices).length === 0 && (
-                <Typography variant="body2" color="text.secondary" textAlign="center" sx={{ py: 2 }}>
-                  No real-time data available
-                </Typography>
-              )}
+              <Typography variant="h4">
+                {marketSummary?.total_stocks || topStocks.length || 0}
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
+        
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="text.secondary" gutterBottom>
+                Companies
+              </Typography>
+              <Typography variant="h4">
+                {marketSummary?.companies || 0}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="text.secondary" gutterBottom>
+                Market Status
+              </Typography>
+              <Typography variant="h4">
+                <Chip 
+                  label={marketSummary?.market_status || 'CLOSED'}
+                  color={marketSummary?.market_status === 'OPEN' ? 'success' : 'default'}
+                />
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="text.secondary" gutterBottom>
+                Active Symbols
+              </Typography>
+              <Typography variant="h4">
+                {marketSummary?.active_symbols || topStocks.length || 0}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
 
-        {/* Top Gainers */}
+      {/* Currency Widget */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12}>
+          <CurrencyWidget />
+        </Grid>
+      </Grid>
+
+      {/* Top Gainers and Losers */}
+      <Grid container spacing={3}>
         <Grid item xs={12} md={6}>
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <TrendingUpIcon color="success" />
                 Top Gainers
               </Typography>
               <TableContainer>
@@ -237,49 +259,38 @@ const Dashboard = () => {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {marketSummary?.top_gainers?.slice(0, 5).map((stock) => (
-                      <TableRow
-                        key={stock.symbol}
-                        hover
-                        onClick={() => handleSymbolClick(stock.symbol)}
-                        sx={{ cursor: 'pointer' }}
-                      >
-                        <TableCell>
-                          <Box>
+                    {topStocks
+                      .filter(stock => stock.price_change_percent >= 0)
+                      .sort((a, b) => b.price_change_percent - a.price_change_percent)
+                      .slice(0, 5)
+                      .map((stock) => (
+                        <TableRow key={stock.symbol} hover>
+                          <TableCell>
                             <Typography variant="body2" fontWeight="bold">
                               {stock.symbol}
                             </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {stock.name}
+                          </TableCell>
+                          <TableCell align="right">
+                            {formatPrice(stock.last_price)}
+                          </TableCell>
+                          <TableCell align="right">
+                            <Typography color="success.main" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.5 }}>
+                              {formatPercent(stock.price_change_percent)}
+                              {getChangeIcon(stock.price_change_percent)}
                             </Typography>
-                          </Box>
-                        </TableCell>
-                        <TableCell align="right">
-                          <Typography variant="body2">
-                            {formatPrice(stock.price)}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="right">
-                          <Box sx={{ color: 'success.main', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                            <TrendingUpIcon fontSize="small" sx={{ mr: 0.5 }} />
-                            <Typography variant="body2">
-                              {formatPercent(stock.change_percent)}
-                            </Typography>
-                          </Box>
-                        </TableCell>
-                        <TableCell align="right">
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleSymbolClick(stock.symbol);
-                            }}
-                          >
-                            <ChartIcon fontSize="small" />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    )) || []}
+                          </TableCell>
+                          <TableCell align="right">
+                            <Tooltip title="View Chart">
+                              <IconButton 
+                                size="small" 
+                                onClick={() => navigate(`/charts/${stock.symbol}`)}
+                              >
+                                <ChartIcon />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      ))}
                   </TableBody>
                 </Table>
               </TableContainer>
@@ -287,11 +298,11 @@ const Dashboard = () => {
           </Card>
         </Grid>
 
-        {/* Top Losers */}
         <Grid item xs={12} md={6}>
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <TrendingDownIcon color="error" />
                 Top Losers
               </Typography>
               <TableContainer>
@@ -305,49 +316,38 @@ const Dashboard = () => {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {marketSummary?.top_losers?.slice(0, 5).map((stock) => (
-                      <TableRow
-                        key={stock.symbol}
-                        hover
-                        onClick={() => handleSymbolClick(stock.symbol)}
-                        sx={{ cursor: 'pointer' }}
-                      >
-                        <TableCell>
-                          <Box>
+                    {topStocks
+                      .filter(stock => stock.price_change_percent < 0)
+                      .sort((a, b) => a.price_change_percent - b.price_change_percent)
+                      .slice(0, 5)
+                      .map((stock) => (
+                        <TableRow key={stock.symbol} hover>
+                          <TableCell>
                             <Typography variant="body2" fontWeight="bold">
                               {stock.symbol}
                             </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {stock.name}
+                          </TableCell>
+                          <TableCell align="right">
+                            {formatPrice(stock.last_price)}
+                          </TableCell>
+                          <TableCell align="right">
+                            <Typography color="error.main" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.5 }}>
+                              {formatPercent(stock.price_change_percent)}
+                              {getChangeIcon(stock.price_change_percent)}
                             </Typography>
-                          </Box>
-                        </TableCell>
-                        <TableCell align="right">
-                          <Typography variant="body2">
-                            {formatPrice(stock.price)}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="right">
-                          <Box sx={{ color: 'error.main', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                            <TrendingDownIcon fontSize="small" sx={{ mr: 0.5 }} />
-                            <Typography variant="body2">
-                              {formatPercent(stock.change_percent)}
-                            </Typography>
-                          </Box>
-                        </TableCell>
-                        <TableCell align="right">
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleSymbolClick(stock.symbol);
-                            }}
-                          >
-                            <ChartIcon fontSize="small" />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    )) || []}
+                          </TableCell>
+                          <TableCell align="right">
+                            <Tooltip title="View Chart">
+                              <IconButton 
+                                size="small" 
+                                onClick={() => navigate(`/charts/${stock.symbol}`)}
+                              >
+                                <ChartIcon />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      ))}
                   </TableBody>
                 </Table>
               </TableContainer>

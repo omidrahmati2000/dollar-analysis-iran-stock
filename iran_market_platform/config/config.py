@@ -19,7 +19,7 @@ class Config:
         self.DB_PORT = int(os.getenv('DB_PORT', 5432))
         self.DB_NAME = os.getenv('DB_NAME', 'iran_market_data')
         self.DB_USER = os.getenv('DB_USER', 'postgres')
-        self.DB_PASSWORD = os.getenv('DB_PASSWORD', 'postgres123')
+        self.DB_PASSWORD = os.getenv('DB_PASSWORD', 'postgres')
         
         # API Configuration - IMPORTANT: Set these in environment variables or .env file
         self.BRSAPI_FREE_KEY = os.getenv('BRSAPI_FREE_KEY', '')  # Set your API key in .env file

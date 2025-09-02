@@ -97,7 +97,7 @@ class StockService:
         
         try:
             # Use repository for search - NO SQL in service!
-            results = self.repository.search_symbols(query, limit)
+            results = self.repository.search_stocks(query, limit)
             
             if not results:
                 return []
@@ -120,12 +120,20 @@ class StockService:
             print(f"Error searching symbols: {e}")
             return []
     
-    def get_ohlcv(self, symbol: str, days: int = 30) -> List[Dict[str, Any]]:
+    def get_ohlcv(self, symbol: str, days: int = 30, timeframe: str = "1d", 
+                   from_date: str = None, to_date: str = None, limit: int = None) -> List[Dict[str, Any]]:
         """Get OHLCV data with calculations"""
         
         try:
-            # Use repository - NO SQL or data generation in service!
-            ohlcv_data = self.repository.get_ohlcv(symbol, days)
+            # Use repository with new parameters
+            ohlcv_data = self.repository.get_ohlcv(
+                symbol=symbol, 
+                days=days, 
+                timeframe=timeframe,
+                from_date=from_date,
+                to_date=to_date,
+                limit=limit
+            )
             
             if not ohlcv_data:
                 return []
@@ -189,6 +197,148 @@ class StockService:
                 'market_trend': 'NEUTRAL',
                 'last_update': datetime.now().isoformat()
             }
+    
+    def get_market_stats(self) -> Dict[str, Any]:
+        """Get accurate market statistics"""
+        
+        try:
+            stats = self.repository.get_market_stats()
+            return stats
+            
+        except Exception as e:
+            print(f"Error fetching market stats: {e}")
+            return {
+                'total_stocks': 0,
+                'active_stocks': 0,
+                'companies': 0,
+                'active_symbols': 0
+            }
+    
+    def get_industry_groups_analysis(self, price_type: int = 3) -> List[Dict[str, Any]]:
+        """Get industry groups analysis with performance metrics"""
+        
+        try:
+            groups = self.repository.get_industry_groups_analysis(price_type)
+            
+            if not groups:
+                return []
+            
+            # Process groups data - check if it's already dict or tuple
+            processed_groups = []
+            
+            for group in groups:
+                # Handle both dict and tuple formats
+                if isinstance(group, dict):
+                    group_dict = dict(group)
+                else:
+                    # Assume tuple format: (industry_group, total_stocks, positive_stocks, negative_stocks, neutral_stocks, avg_change_percent, max_change_percent, min_change_percent, total_market_value)
+                    group_dict = {
+                        'industry_group': group[0],
+                        'total_stocks': group[1],
+                        'positive_stocks': group[2],
+                        'negative_stocks': group[3],
+                        'neutral_stocks': group[4],
+                        'avg_change_percent': float(group[5]) if group[5] is not None else 0.0,
+                        'max_change_percent': float(group[6]) if group[6] is not None else 0.0,
+                        'min_change_percent': float(group[7]) if group[7] is not None else 0.0,
+                        'total_market_value': float(group[8]) if group[8] is not None else 0.0
+                    }
+                
+                # Add business logic calculations
+                total_stocks = group_dict.get('total_stocks', 0)
+                positive_stocks = group_dict.get('positive_stocks', 0)
+                negative_stocks = group_dict.get('negative_stocks', 0)
+                
+                # Calculate performance ratios
+                group_dict['positive_ratio'] = (positive_stocks / total_stocks * 100) if total_stocks > 0 else 0
+                group_dict['negative_ratio'] = (negative_stocks / total_stocks * 100) if total_stocks > 0 else 0
+                
+                # Determine group trend
+                if group_dict['positive_ratio'] > 60:
+                    group_dict['trend'] = 'BULLISH'
+                elif group_dict['negative_ratio'] > 60:
+                    group_dict['trend'] = 'BEARISH'
+                else:
+                    group_dict['trend'] = 'NEUTRAL'
+                
+                processed_groups.append(group_dict)
+            
+            return processed_groups
+            
+        except Exception as e:
+            print(f"Error fetching industry groups analysis: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return []
+    
+    def get_stocks_by_industry(self, industry_group: str, price_type: int = 3, 
+                              sort_by: str = "performance", limit: int = 50) -> List[Dict[str, Any]]:
+        """Get stocks filtered by industry group with performance data"""
+        
+        try:
+            stocks = self.repository.get_stocks_by_industry(
+                industry_group, price_type, sort_by, limit
+            )
+            
+            if not stocks:
+                return []
+            
+            # Add business logic formatting
+            processed_stocks = []
+            for stock in stocks:
+                # Handle both dict and tuple formats
+                if isinstance(stock, dict):
+                    stock_dict = dict(stock)
+                else:
+                    # Assume tuple format from query
+                    stock_dict = {
+                        'symbol': stock[0],
+                        'company_name': stock[1],
+                        'industry_group': stock[2],
+                        'market_value': stock[3],
+                        'pe_ratio': stock[4],
+                        'eps': stock[5],
+                        'last_price': stock[6],
+                        'price_change': stock[7],
+                        'volume': stock[8],
+                        'price_change_percent': stock[9]
+                    }
+                
+                processed_stock = {
+                    'symbol': stock_dict['symbol'],
+                    'company_name': stock_dict['company_name'],
+                    'industry_group': stock_dict['industry_group'],
+                    'last_price': float(stock_dict.get('last_price', 0)) if stock_dict.get('last_price') is not None else 0.0,
+                    'price_change': float(stock_dict.get('price_change', 0)) if stock_dict.get('price_change') is not None else 0.0,
+                    'price_change_percent': float(stock_dict.get('price_change_percent', 0)) if stock_dict.get('price_change_percent') is not None else 0.0,
+                    'volume': int(stock_dict.get('volume', 0)) if stock_dict.get('volume') is not None else 0,
+                    'market_value': float(stock_dict.get('market_value', 0)) if stock_dict.get('market_value') else 0,
+                    'pe_ratio': float(stock_dict.get('pe_ratio', 0)) if stock_dict.get('pe_ratio') else None,
+                    'eps': float(stock_dict.get('eps', 0)) if stock_dict.get('eps') else None
+                }
+                
+                # Add performance category
+                change_percent = processed_stock['price_change_percent']
+                if change_percent > 2:
+                    processed_stock['performance_category'] = 'STRONG_POSITIVE'
+                elif change_percent > 0:
+                    processed_stock['performance_category'] = 'POSITIVE'
+                elif change_percent < -2:
+                    processed_stock['performance_category'] = 'STRONG_NEGATIVE'
+                elif change_percent < 0:
+                    processed_stock['performance_category'] = 'NEGATIVE'
+                else:
+                    processed_stock['performance_category'] = 'NEUTRAL'
+                
+                processed_stocks.append(processed_stock)
+            
+            return processed_stocks
+            
+        except Exception as e:
+            print(f"Error fetching stocks by industry: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return []
     
     def _format_stock_data(self, stock: Dict[str, Any]) -> Dict[str, Any]:
         """Format stock data for API response"""

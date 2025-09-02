@@ -14,7 +14,7 @@ class AppConfig(BaseSettings):
     DB_PORT: int = 5432
     DB_NAME: str = "iran_market_data"
     DB_USER: str = "postgres"
-    DB_PASSWORD: str = "postgres123"
+    DB_PASSWORD: str = os.getenv("DB_PASSWORD", "postgres")
     
     # API settings - IMPORTANT: Set these in environment variables or .env file
     BRSAPI_FREE_KEY: str = ""  # Set your API key in .env file

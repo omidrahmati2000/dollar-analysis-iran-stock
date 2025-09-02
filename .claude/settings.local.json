@@ -38,7 +38,21 @@
       "Bash(/dev/null)",
       "Bash(pip show:*)",
       "Bash(git reset:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "WebFetch(domain:localhost)",
+      "Bash(npm install)",
+      "Bash(npm start)",
+      "Bash(npm install:*)",
+      "Bash(set PORT=3001)",
+      "Bash(npx:*)",
+      "Bash(npm run build:*)",
+      "Bash(taskkill:*)",
+      "Bash(winpty docker exec -it iran-market-db-v2 psql -U postgres -d iran_market_data -c \"SELECT COUNT(*) FROM stock_symbols;\")",
+      "Bash(docker:*)",
+      "Bash(winpty docker exec -it iran-market-db-v2 psql -U postgres -d iran_market_data -c \"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ''stock_symbols'' ORDER BY ordinal_position;\")",
+      "Bash(winpty docker exec -it iran-market-db-v2 psql -U postgres -d iran_market_data -c \"SELECT table_name FROM information_schema.tables WHERE table_schema = ''public'';\")",
+      "Bash(winpty docker exec -it iran-market-app-v2 ls -la /app/trading_platform/api/)",
+      "Bash(winpty docker exec -it iran-market-db-v2 psql -U postgres -d iran_market_data -c \"SELECT symbol, company_name FROM stock_symbols WHERE symbol ILIKE ''%TA%'' LIMIT 5;\")"
     ],
     "deny": [],
     "ask": []

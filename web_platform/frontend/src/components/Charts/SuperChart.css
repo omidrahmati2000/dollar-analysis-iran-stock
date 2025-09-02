@@ -1,0 +1,469 @@
+/* SuperChart Component Styles */
+.super-chart {
+  width: 100%;
+  min-height: 100vh;
+  background: #1a1a1a;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Toolbar Styles */
+.chart-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 20px;
+  background: #2d2d2d;
+  border-bottom: 1px solid #404040;
+  flex-wrap: wrap;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.toolbar-section label {
+  font-size: 13px;
+  color: #cccccc;
+  font-weight: 500;
+}
+
+.symbol {
+  background: #0066cc;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.chart-selector, 
+.toolbar-section select {
+  background: #404040;
+  border: 1px solid #555;
+  color: #ffffff;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  min-width: 120px;
+}
+
+.chart-selector:focus,
+.toolbar-section select:focus {
+  outline: none;
+  border-color: #0066cc;
+  box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.2);
+}
+
+.toolbar-btn {
+  background: #404040;
+  border: 1px solid #555;
+  color: #ffffff;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.toolbar-btn:hover {
+  background: #555;
+  border-color: #666;
+}
+
+.toolbar-btn.active {
+  background: #0066cc;
+  border-color: #0066cc;
+  box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.2);
+}
+
+/* Indicators Panel */
+.indicators-panel {
+  background: #252525;
+  padding: 15px 20px;
+  border-bottom: 1px solid #404040;
+}
+
+.indicators-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.indicator-btn {
+  background: #404040;
+  border: 1px solid #555;
+  color: #ffffff;
+  padding: 5px 10px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.indicator-btn:hover {
+  background: #555;
+}
+
+.active-indicators {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.indicator-tag {
+  background: #0066cc;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.remove-btn {
+  background: rgba(255,255,255,0.2);
+  border: none;
+  color: white;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.remove-btn:hover {
+  background: rgba(255,255,255,0.3);
+}
+
+/* Chart Container */
+.chart-container {
+  display: flex;
+  background: #1a1a1a;
+  min-height: 600px;
+}
+
+.main-chart {
+  flex: 1;
+  background: #1a1a1a;
+  border-right: 1px solid #404040;
+}
+
+.chart-container svg {
+  background: #1a1a1a;
+}
+
+/* Chart Axes and Grid Styles */
+.chart-container .x-axis,
+.chart-container .y-axis {
+  font-size: 11px;
+  fill: #888;
+}
+
+.chart-container .x-axis line,
+.chart-container .y-axis line {
+  stroke: #333;
+}
+
+.chart-container .x-axis path,
+.chart-container .y-axis path {
+  stroke: #333;
+}
+
+/* Volume Profile Sidebar */
+.volume-profile-sidebar {
+  width: 300px;
+  background: #252525;
+  border-left: 1px solid #404040;
+  overflow-y: auto;
+}
+
+.volume-profile-container {
+  padding: 10px;
+}
+
+.volume-profile-stats {
+  background: #2d2d2d;
+  padding: 10px;
+  margin-top: 10px;
+  border-radius: 4px;
+}
+
+.stat-item {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  font-size: 12px;
+}
+
+.stat-item span:first-child {
+  color: #aaa;
+}
+
+.stat-item span:last-child {
+  color: #fff;
+  font-weight: 500;
+}
+
+/* Chart Info Panel */
+.chart-info {
+  background: #252525;
+  padding: 15px 20px;
+  border-top: 1px solid #404040;
+  display: flex;
+  gap: 30px;
+  flex-wrap: wrap;
+}
+
+.info-section {
+  flex: 1;
+  min-width: 200px;
+}
+
+.info-section h4 {
+  color: #ffffff;
+  font-size: 14px;
+  margin-bottom: 10px;
+  font-weight: 600;
+  border-bottom: 1px solid #404040;
+  padding-bottom: 5px;
+}
+
+.market-stats,
+.indicator-values {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stat,
+.indicator-value {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.stat label,
+.indicator-value label {
+  color: #aaa;
+  font-weight: 500;
+}
+
+.stat span,
+.indicator-value span {
+  color: #fff;
+  font-weight: 600;
+}
+
+.price {
+  color: #4caf50 !important;
+  font-size: 14px !important;
+}
+
+/* Timeframe Selector Styles */
+.timeframe-selector {
+  background: #2d2d2d;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  padding: 8px;
+  min-width: 300px;
+}
+
+.timeframe-categories {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.category-btn {
+  background: #404040;
+  border: 1px solid #555;
+  color: #ccc;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+.category-btn.active {
+  background: #0066cc;
+  border-color: #0066cc;
+  color: white;
+}
+
+.timeframe-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.recent-section,
+.preset-section,
+.custom-section {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.section-label {
+  font-size: 10px;
+  color: #888;
+  min-width: 50px;
+}
+
+.timeframe-btn {
+  background: #404040;
+  border: 1px solid #555;
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
+  min-width: 35px;
+}
+
+.timeframe-btn:hover {
+  background: #555;
+}
+
+.timeframe-btn.active {
+  background: #0066cc;
+  border-color: #0066cc;
+}
+
+.timeframe-btn.custom {
+  background: #8e24aa;
+  border-color: #8e24aa;
+}
+
+.add-custom-btn {
+  background: #4caf50;
+  border: 1px solid #4caf50;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+/* Custom Dialog */
+.custom-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.custom-dialog {
+  background: #2d2d2d;
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid #404040;
+  min-width: 300px;
+}
+
+.custom-dialog h3 {
+  color: #fff;
+  margin-bottom: 15px;
+  font-size: 16px;
+}
+
+.form-group {
+  margin-bottom: 15px;
+}
+
+.form-group label {
+  display: block;
+  color: #ccc;
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.form-group select,
+.form-group input {
+  width: 100%;
+  background: #404040;
+  border: 1px solid #555;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.dialog-buttons {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.dialog-buttons button {
+  background: #0066cc;
+  border: none;
+  color: white;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.dialog-buttons button:last-child {
+  background: #666;
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+  .chart-container {
+    flex-direction: column;
+  }
+  
+  .volume-profile-sidebar {
+    width: 100%;
+    max-height: 300px;
+  }
+  
+  .chart-info {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 768px) {
+  .chart-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  
+  .toolbar-section {
+    justify-content: space-between;
+  }
+  
+  .timeframe-selector {
+    min-width: auto;
+  }
+  
+  .main-chart {
+    min-height: 400px;
+  }
+}

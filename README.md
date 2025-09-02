@@ -88,8 +88,30 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=iran_market_data
 DB_USER=postgres
-DB_PASSWORD=postgres123
+DB_PASSWORD=your_secure_password
 ```
+
+## 🔒 Security & Production
+
+### Environment Variables
+**IMPORTANT**: Never commit sensitive information to Git. Always use environment variables for:
+- API keys (`BRSAPI_FREE_KEY`, `BRSAPI_PRO_KEY`)
+- Database passwords (`DB_PASSWORD`, `POSTGRES_PASSWORD`)
+- JWT secret keys (`SECRET_KEY`)
+
+### Production Deployment
+1. Copy `.env.example` to `.env` and fill in your actual values
+2. Use strong, unique passwords for production
+3. Set `DEBUG=false` in production
+4. Configure proper firewall rules
+5. Use SSL/TLS certificates for HTTPS
+6. Regular security updates
+
+### Docker Security
+- Change default passwords in `docker-compose.yml`
+- Use Docker secrets for sensitive data in production
+- Limit container resource usage
+- Run containers with non-root users when possible
 
 ## 🏗️ Architecture
 

@@ -1,0 +1,421 @@
+.industry-analysis {
+    padding: 20px;
+    max-width: 1400px;
+    margin: 0 auto;
+    font-family: 'Vazir', Arial, sans-serif;
+    direction: rtl;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid #e0e0e0;
+}
+
+.header h1 {
+    color: #333;
+    margin: 0;
+    font-size: 2.5rem;
+}
+
+.controls {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.search-control, .price-type-switch, .sort-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.search-control input {
+    padding: 8px 12px;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    background: #0D1117;
+    color: #F0F6FC;
+    font-size: 14px;
+    min-width: 200px;
+    transition: border-color 0.3s;
+}
+
+.search-control input:focus {
+    outline: none;
+    border-color: #2196f3;
+}
+
+.search-control input::placeholder {
+    color: #8B949E;
+}
+
+.search-control label {
+    font-weight: 600;
+    color: #F0F6FC;
+}
+
+.price-type-switch label, .sort-control label {
+    font-weight: 600;
+    color: #555;
+}
+
+.price-type-switch select, .sort-control select {
+    padding: 8px 12px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    background: white;
+    cursor: pointer;
+    transition: border-color 0.3s;
+}
+
+.price-type-switch select:focus, .sort-control select:focus {
+    outline: none;
+    border-color: #2196F3;
+}
+
+.market-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.stat-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 25px;
+    border-radius: 15px;
+    text-align: center;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.stat-card h3 {
+    margin: 0 0 15px 0;
+    font-size: 1.1rem;
+    opacity: 0.9;
+}
+
+.stat-card .value {
+    font-size: 2rem;
+    font-weight: bold;
+    margin: 0;
+}
+
+.content-wrapper {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 30px;
+    height: calc(100vh - 300px);
+}
+
+.industry-groups-panel, .industry-stocks-panel {
+    background: white;
+    border-radius: 15px;
+    padding: 25px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.industry-groups-panel h2, .industry-stocks-panel h2 {
+    margin: 0 0 20px 0;
+    color: #333;
+    font-size: 1.8rem;
+    border-bottom: 3px solid #2196F3;
+    padding-bottom: 15px;
+}
+
+.industry-groups-list {
+    overflow-y: auto;
+    flex: 1;
+    padding-right: 10px;
+}
+
+.industry-group {
+    border: 2px solid #f0f0f0;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 15px;
+    cursor: pointer;
+    transition: all 0.3s;
+    background: #fafafa;
+}
+
+.industry-group:hover {
+    border-color: #2196F3;
+    box-shadow: 0 4px 15px rgba(33, 150, 243, 0.1);
+    transform: translateY(-2px);
+}
+
+.industry-group.selected {
+    border-color: #2196F3;
+    background: #f3f8ff;
+    box-shadow: 0 4px 15px rgba(33, 150, 243, 0.2);
+}
+
+.group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.group-header h4 {
+    margin: 0;
+    color: #333;
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.trend-badge {
+    color: white;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.group-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.stat .label {
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.stat .value {
+    font-weight: 600;
+    color: #333;
+}
+
+.stat .value.positive {
+    color: #4CAF50;
+}
+
+.stat .value.negative {
+    color: #f44336;
+}
+
+.performance-bars {
+    margin-top: 15px;
+}
+
+.bar-container {
+    height: 8px;
+    background: #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+}
+
+.positive-bar {
+    background: #4CAF50;
+    height: 100%;
+    transition: width 0.3s;
+}
+
+.negative-bar {
+    background: #f44336;
+    height: 100%;
+    transition: width 0.3s;
+    margin-right: auto;
+}
+
+.bar-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 0.85rem;
+}
+
+.bar-labels .positive {
+    color: #4CAF50;
+    font-weight: 600;
+}
+
+.bar-labels .negative {
+    color: #f44336;
+    font-weight: 600;
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.panel-header select {
+    padding: 8px 12px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    background: white;
+    cursor: pointer;
+}
+
+.stocks-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.stocks-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.stocks-table th {
+    background: #f8f9fa;
+    padding: 15px 12px;
+    text-align: right;
+    border-bottom: 2px solid #e9ecef;
+    font-weight: 600;
+    color: #333;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.stocks-table td {
+    padding: 12px;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background-color 0.2s;
+}
+
+.stocks-table tr:hover {
+    background: #f8f9fa;
+}
+
+.symbol {
+    font-weight: 600;
+    color: #2196F3;
+}
+
+.company-name {
+    color: #333;
+}
+
+.price, .change, .change-percent, .volume, .pe-ratio {
+    text-align: left;
+    font-weight: 500;
+}
+
+.no-selection {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    color: #666;
+    text-align: center;
+}
+
+.no-selection h3 {
+    margin-bottom: 15px;
+    font-size: 1.5rem;
+}
+
+.no-selection p {
+    font-size: 1rem;
+    opacity: 0.8;
+}
+
+.loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 200px;
+    font-size: 1.2rem;
+    color: #666;
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+    .content-wrapper {
+        grid-template-columns: 1fr;
+        height: auto;
+    }
+    
+    .industry-groups-panel {
+        max-height: 400px;
+    }
+    
+    .industry-stocks-panel {
+        max-height: 600px;
+    }
+}
+
+@media (max-width: 768px) {
+    .industry-analysis {
+        padding: 10px;
+    }
+    
+    .header {
+        flex-direction: column;
+        gap: 15px;
+        align-items: stretch;
+    }
+    
+    .controls {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+    
+    .market-overview {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .group-stats {
+        grid-template-columns: 1fr;
+    }
+    
+    .stocks-table {
+        font-size: 0.8rem;
+    }
+    
+    .stocks-table th,
+    .stocks-table td {
+        padding: 8px 6px;
+    }
+}
+
+/* Scrollbar Styling */
+.industry-groups-list::-webkit-scrollbar,
+.stocks-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.industry-groups-list::-webkit-scrollbar-track,
+.stocks-list::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+.industry-groups-list::-webkit-scrollbar-thumb,
+.stocks-list::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 4px;
+}
+
+.industry-groups-list::-webkit-scrollbar-thumb:hover,
+.stocks-list::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}

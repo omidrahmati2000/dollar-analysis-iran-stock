@@ -4,7 +4,10 @@ Currency Service - Business logic for currency operations
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import random
+import logging
 from trading_platform.api.repositories.currency_repository import CurrencyRepository
+
+logger = logging.getLogger(__name__)
 
 
 class CurrencyService:
@@ -17,25 +20,19 @@ class CurrencyService:
         """Get currencies with business logic processing"""
         
         try:
-            print(f"DEBUG: Calling repository.get_currencies with limit={limit}, filter={currency_filter}")
             currencies = self.repository.get_currencies(limit, currency_filter)
-            print(f"DEBUG: Repository returned {len(currencies) if currencies else 0} currencies")
             
             if not currencies:
-                print("DEBUG: No currencies returned from repository, using mock data")
                 return self._generate_mock_currencies()
             
             # Process and enhance currency data
             processed = []
             for currency in currencies:
-                print(f"DEBUG: Processing currency: {currency}")
                 processed.append(self._format_currency_data(currency))
-            
-            print(f"DEBUG: Processed {len(processed)} currencies successfully")
             return processed
             
         except Exception as e:
-            print(f"ERROR: Exception in get_currencies: {e}")
+            logger.error(f"Exception in get_currencies: {e}")
             import traceback
             print(f"TRACEBACK: {traceback.format_exc()}")
             return self._generate_mock_currencies()
@@ -122,6 +119,28 @@ class CurrencyService:
                 'amount': amount
             }
     
+    def search_currencies(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Search for currencies by code or name"""
+        try:
+            results = self.repository.search_currencies(query, limit)
+            
+            # Process results
+            processed_results = []
+            for currency in results:
+                processed_results.append(self._format_currency_data(currency))
+            
+            return processed_results
+        except Exception as e:
+            print(f"Error searching currencies: {e}")
+            # Fallback to mock data search
+            mock_data = self._generate_mock_currencies()
+            query_lower = query.lower()
+            filtered = [c for c in mock_data if 
+                       query_lower in c['currency_code'].lower() or 
+                       query_lower in c['currency_name'].lower() or
+                       query_lower in c['currency_name_fa']]
+            return filtered[:limit]
+
     def get_currency_statistics(self) -> Dict[str, Any]:
         """Get currency market statistics"""
         

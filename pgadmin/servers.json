@@ -1,0 +1,21 @@
+{
+    "Servers": {
+        "1": {
+            "Name": "Iran Market Database",
+            "Group": "Servers",
+            "Host": "postgres",
+            "Port": 5432,
+            "MaintenanceDB": "iran_market_data",
+            "Username": "postgres",
+            "SSLMode": "prefer",
+            "UseSSHTunnel": 0,
+            "TunnelPort": "22",
+            "TunnelAuthentication": 0,
+            "KerberosAuthentication": false,
+            "ConnectionParameters": {
+                "sslmode": "prefer",
+                "connect_timeout": 10
+            }
+        }
+    }
+}

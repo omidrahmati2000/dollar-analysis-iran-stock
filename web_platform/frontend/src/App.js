@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, Box } from '@mui/material';
 import { QueryClient, QueryClientProvider } from 'react-query';
@@ -17,6 +17,8 @@ import Login from './pages/Auth/Login';
 import ChartDemo from './components/Charts/ChartDemo';
 import IndustryAnalysis from './pages/IndustryAnalysis/IndustryAnalysis';
 import Currencies from './pages/Currencies/Currencies';
+import SymbolMathPage from './pages/SymbolMath/SymbolMath';
+import AdvancedChartsPage from './pages/AdvancedCharts/AdvancedCharts';
 
 // Services
 import { AuthProvider, useAuth } from './services/auth';
@@ -81,6 +83,8 @@ const darkTheme = createTheme({
 
 function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const location = useLocation();
+  const isAdvancedCharts = location.pathname === '/advanced-charts';
 
   // Free platform - no authentication required
 
@@ -94,7 +98,7 @@ function AppContent() {
         sx={{ 
           flexGrow: 1, 
           pt: '64px', // Account for header height
-          pl: sidebarOpen ? '240px' : '0px', // Account for sidebar
+          pl: isAdvancedCharts ? '0px' : (sidebarOpen ? '240px' : '0px'), // No left padding for advanced charts
           transition: 'padding-left 0.3s ease',
           overflow: 'hidden',
           height: '100vh',
@@ -111,6 +115,8 @@ function AppContent() {
           <Route path="/watchlist" element={<Watchlist />} />
           <Route path="/industry-analysis" element={<IndustryAnalysis />} />
           <Route path="/currencies" element={<Currencies />} />
+          <Route path="/symbol-math" element={<SymbolMathPage />} />
+          <Route path="/advanced-charts" element={<AdvancedChartsPage />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Box>
@@ -123,14 +129,14 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <ApiProvider>
-          <WebSocketProvider>
+          {/* <WebSocketProvider> */}
             <ThemeProvider theme={darkTheme}>
               <CssBaseline />
               <Router>
                 <AppContent />
               </Router>
             </ThemeProvider>
-          </WebSocketProvider>
+          {/* </WebSocketProvider> */}
         </ApiProvider>
       </AuthProvider>
     </QueryClientProvider>

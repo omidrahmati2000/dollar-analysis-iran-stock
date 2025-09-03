@@ -488,11 +488,17 @@ async def get_market_stats():
          description="Retrieve industry groups with performance analysis")
 async def get_industry_groups_analysis(
     price_type: int = Query(3, description="Price type: 2=unadjusted, 3=adjusted"),
-    sort_by: str = Query("performance", description="Sort by: performance, total_stocks, positive_ratio")
+    sort_by: str = Query("performance", description="Sort by: performance, total_stocks, positive_ratio"),
+    from_date: Optional[str] = Query(None, description="Start date for analysis (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(None, description="End date for analysis (YYYY-MM-DD)")
 ):
     """Get industry groups analysis"""
     try:
-        groups = stock_service.get_industry_groups_analysis(price_type)
+        groups = stock_service.get_industry_groups_analysis(
+            price_type=price_type,
+            from_date=from_date,
+            to_date=to_date
+        )
         
         # Apply sorting
         if sort_by == "performance":
@@ -521,7 +527,9 @@ async def get_stocks_by_industry(
     industry_group: str = Path(..., description="Industry group name"),
     price_type: int = Query(3, description="Price type: 2=unadjusted, 3=adjusted"),
     sort_by: str = Query("performance", description="Sort by: performance, price, volume, market_value, symbol, name"),
-    limit: int = Query(50, ge=1, le=200, description="Number of results to return")
+    limit: int = Query(50, ge=1, le=200, description="Number of results to return"),
+    from_date: Optional[str] = Query(None, description="Start date for analysis (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(None, description="End date for analysis (YYYY-MM-DD)")
 ):
     """Get stocks by industry group"""
     try:
@@ -529,7 +537,9 @@ async def get_stocks_by_industry(
             industry_group=industry_group,
             price_type=price_type,
             sort_by=sort_by,
-            limit=limit
+            limit=limit,
+            from_date=from_date,
+            to_date=to_date
         )
         
         return {

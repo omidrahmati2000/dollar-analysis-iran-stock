@@ -65,7 +65,8 @@ const Header = ({ onMenuClick }) => {
   };
 
   return (
-    <AppBar 
+    <AppBar
+      data-testid="header" 
       position="fixed" 
       sx={{ 
         zIndex: (theme) => theme.zIndex.drawer + 1,

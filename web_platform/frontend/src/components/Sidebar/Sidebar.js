@@ -31,7 +31,9 @@ import {
   Analytics as AnalyticsIcon,
   Notifications as AlertsIcon,
   BusinessCenter as IndustryIcon,
-  MonetizationOn as CurrencyIcon
+  MonetizationOn as CurrencyIcon,
+  Calculate as CalculateIcon,
+  Insights as AdvancedChartIcon
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -40,9 +42,11 @@ const DRAWER_WIDTH = 240;
 const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
   { text: 'Charts', icon: <ChartsIcon />, path: '/charts' },
+  { text: 'Advanced Charts', icon: <AdvancedChartIcon />, path: '/advanced-charts' },
   { text: 'Currencies', icon: <CurrencyIcon />, path: '/currencies' },
   { text: 'Screener', icon: <ScreenerIcon />, path: '/screener' },
   { text: 'Industry Analysis', icon: <IndustryIcon />, path: '/industry-analysis' },
+  { text: 'Symbol Math', icon: <CalculateIcon />, path: '/symbol-math' },
   { text: 'Portfolio', icon: <PortfolioIcon />, path: '/portfolio' },
   { text: 'Watchlist', icon: <WatchlistIcon />, path: '/watchlist' },
   { text: 'Alerts', icon: <AlertsIcon />, path: '/alerts' },
@@ -146,7 +150,7 @@ const Sidebar = ({ open, onClose }) => {
   };
 
   const drawerContent = (
-    <Box sx={{ width: DRAWER_WIDTH, height: '100%', bgcolor: 'background.paper' }}>
+    <Box sx={{ width: DRAWER_WIDTH, height: '100%', bgcolor: 'background.paper' }} data-testid="sidebar">
       {/* Header spacer */}
       <Box sx={{ height: 64 }} />
       

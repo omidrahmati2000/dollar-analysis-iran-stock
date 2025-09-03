@@ -24,7 +24,7 @@ import {
 } from '@mui/icons-material';
 import SearchService from '../../services/api/SearchService';
 
-const GlobalSearch = ({ onSelect, placeholder = "جستجوی سهام و ارز..." }) => {
+const GlobalSearch = ({ onSelect, placeholder = "جستجوی سهام و ارز...", expressionMode = false }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState({ stocks: [], currencies: [] });
   const [loading, setLoading] = useState(false);
@@ -51,7 +51,18 @@ const GlobalSearch = ({ onSelect, placeholder = "جستجوی سهام و ارز
 
   useEffect(() => {
     const searchData = async () => {
-      if (!query || query.length < 2) {
+      let searchQuery = query;
+      
+      // In expression mode, extract the last symbol being typed
+      if (expressionMode && query) {
+        // Split by mathematical operators and get the last part
+        const operators = /[\+\-\*\/\^\(\)\s]/;
+        const parts = query.split(operators);
+        const lastPart = parts[parts.length - 1].trim();
+        searchQuery = lastPart;
+      }
+      
+      if (!searchQuery || searchQuery.length < 1) {
         setResults({ stocks: [], currencies: [] });
         setShowResults(false);
         return;
@@ -62,7 +73,7 @@ const GlobalSearch = ({ onSelect, placeholder = "جستجوی سهام و ارز
       setShowResults(true);
       
       try {
-        const data = await SearchService.searchAll(query, 10);
+        const data = await SearchService.searchAll(searchQuery, 10);
         setResults(data);
       } catch (error) {
         console.error('Search error:', error);
@@ -74,7 +85,7 @@ const GlobalSearch = ({ onSelect, placeholder = "جستجوی سهام و ارز
 
     const timeoutId = setTimeout(searchData, 300); // Debounce
     return () => clearTimeout(timeoutId);
-  }, [query]);
+  }, [query, expressionMode]);
 
   const updateResultsPosition = () => {
     if (searchRef.current) {
@@ -89,9 +100,18 @@ const GlobalSearch = ({ onSelect, placeholder = "جستجوی سهام و ارز
 
   const handleSelect = (item, type) => {
     if (onSelect) {
-      onSelect(item, type);
+      if (expressionMode) {
+        // In expression mode, replace only the last symbol being typed
+        const operators = /[\+\-\*\/\^\(\)\s]/;
+        const parts = query.split(operators);
+        const lastPartIndex = query.lastIndexOf(parts[parts.length - 1]);
+        const beforeLastPart = query.substring(0, lastPartIndex);
+        const newQuery = beforeLastPart + item.symbol;
+        onSelect(newQuery, type);
+      } else {
+        onSelect(item, type);
+      }
     }
-    setQuery('');
     setShowResults(false);
   };
 

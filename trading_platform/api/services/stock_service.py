@@ -214,11 +214,11 @@ class StockService:
                 'active_symbols': 0
             }
     
-    def get_industry_groups_analysis(self, price_type: int = 3) -> List[Dict[str, Any]]:
+    def get_industry_groups_analysis(self, price_type: int = 3, from_date: Optional[str] = None, to_date: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get industry groups analysis with performance metrics"""
         
         try:
-            groups = self.repository.get_industry_groups_analysis(price_type)
+            groups = self.repository.get_industry_groups_analysis(price_type, from_date, to_date)
             
             if not groups:
                 return []
@@ -272,12 +272,12 @@ class StockService:
             return []
     
     def get_stocks_by_industry(self, industry_group: str, price_type: int = 3, 
-                              sort_by: str = "performance", limit: int = 50) -> List[Dict[str, Any]]:
+                              sort_by: str = "performance", limit: int = 50, from_date: Optional[str] = None, to_date: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get stocks filtered by industry group with performance data"""
         
         try:
             stocks = self.repository.get_stocks_by_industry(
-                industry_group, price_type, sort_by, limit
+                industry_group, price_type, sort_by, limit, from_date, to_date
             )
             
             if not stocks:

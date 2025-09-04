@@ -27,7 +27,12 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  TextField
+  TextField,
+  Tabs,
+  Tab,
+  Slider,
+  FormGroup,
+  FormLabel
 } from '@mui/material';
 import {
   TrendingUp,
@@ -46,7 +51,8 @@ import {
   CandlestickChart,
   BarChart,
   LineAxis,
-  ScatterPlot
+  ScatterPlot,
+  Delete
 } from '@mui/icons-material';
 import MultiPanelChartEngine from '../../components/AdvancedChart/MultiPanelChartEngine';
 import DrawingTools from '../../components/AdvancedChart/DrawingTools';
@@ -80,6 +86,9 @@ const AdvancedCharts = () => {
   const [indicatorParams, setIndicatorParams] = useState({});
   const [lastChartData, setLastChartData] = useState(null);
   const [adjustedData, setAdjustedData] = useState(false); // For stocks: false = unadjusted, true = adjusted
+  const [drawingPanelOpen, setDrawingPanelOpen] = useState(false);
+  const [hoverData, setHoverData] = useState(null);
+  const [candleTooltip, setCandleTooltip] = useState({ visible: false, x: 0, y: 0, data: null });
 
   // Iranian stocks and currencies - will be populated from backend
   const symbols = realSymbols.length > 0 ? realSymbols : [
@@ -165,14 +174,35 @@ const AdvancedCharts = () => {
   };
   
   const drawingTools = [
-    { id: 'none', name: 'Select', icon: '🖱️' },
-    { id: 'trendline', name: 'Trend Line', icon: '📈' },
-    { id: 'horizontal', name: 'Horizontal Line', icon: '➖' },
-    { id: 'vertical', name: 'Vertical Line', icon: '|' },
-    { id: 'rectangle', name: 'Rectangle', icon: '⬛' },
-    { id: 'fibonacci', name: 'Fibonacci', icon: '🌀' },
-    { id: 'text', name: 'Text', icon: '📝' }
+    { id: 'none', name: 'Select', icon: '🖱️', category: 'cursor' },
+    { id: 'crosshair', name: 'Crosshair', icon: '✚', category: 'cursor' },
+    { id: 'trendline', name: 'Trend Line', icon: '📈', category: 'lines' },
+    { id: 'horizontal', name: 'Horizontal Line', icon: '➖', category: 'lines' },
+    { id: 'vertical', name: 'Vertical Line', icon: '|', category: 'lines' },
+    { id: 'ray', name: 'Ray', icon: '→', category: 'lines' },
+    { id: 'parallel', name: 'Parallel Channel', icon: '‖', category: 'channels' },
+    { id: 'rectangle', name: 'Rectangle', icon: '⬛', category: 'shapes' },
+    { id: 'ellipse', name: 'Ellipse', icon: '⭕', category: 'shapes' },
+    { id: 'triangle', name: 'Triangle', icon: '🔺', category: 'shapes' },
+    { id: 'fibonacci-retracement', name: 'Fib Retracement', icon: '🌀', category: 'fibonacci' },
+    { id: 'fibonacci-extension', name: 'Fib Extension', icon: '🌊', category: 'fibonacci' },
+    { id: 'fibonacci-fan', name: 'Fib Fan', icon: '📐', category: 'fibonacci' },
+    { id: 'fibonacci-arcs', name: 'Fib Arcs', icon: '🌈', category: 'fibonacci' },
+    { id: 'fibonacci-timezones', name: 'Fib Time Zones', icon: '⏰', category: 'fibonacci' },
+    { id: 'gann', name: 'Gann Fan', icon: '📐', category: 'gann' },
+    { id: 'pitchfork', name: 'Pitchfork', icon: '🔱', category: 'pitchfork' }
   ];
+
+  const drawingCategories = {
+    cursor: 'Cursor Tools',
+    lines: 'Lines',
+    channels: 'Channels', 
+    shapes: 'Shapes',
+    fibonacci: 'Fibonacci',
+    gann: 'Gann',
+    pitchfork: 'Pitchfork',
+    annotations: 'Annotations'
+  };
 
   useEffect(() => {
     initializeChart();
@@ -320,6 +350,8 @@ const AdvancedCharts = () => {
       // Initialize drawing tools lazily
       setTimeout(() => {
         drawingToolsRef.current = new DrawingTools(engineRef.current);
+        setupChartHoverHandlers();
+        console.log('✅ Drawing Tools initialized successfully');
       }, 500);
       
       // Load initial data with delay for smoother UI
@@ -495,7 +527,52 @@ const AdvancedCharts = () => {
     if (drawingToolsRef.current) {
       drawingToolsRef.current.setActiveTool(mode);
     }
+    
+    // Auto-close the drawing panel when a tool is selected (except for 'none')
+    if (mode !== 'none' && drawingPanelOpen) {
+      setTimeout(() => {
+        setDrawingPanelOpen(false);
+      }, 300); // Small delay for better UX - user sees the selection
+    }
+    
+    // Show visual feedback
+    const tool = drawingTools.find(t => t.id === mode);
+    if (tool && tool.id !== 'none') {
+      console.log(`✏️ Drawing tool activated: ${tool.name}`);
+      // Could add a toast notification here
+    } else {
+      console.log('🖱️ Selection mode activated');
+    }
   };
+
+  const handleClearAllDrawings = () => {
+    if (drawingToolsRef.current) {
+      drawingToolsRef.current.clearAllDrawings();
+      console.log('🗑️ Cleared all drawings');
+    }
+  };
+
+  const handleDeleteSelectedDrawing = () => {
+    if (drawingToolsRef.current) {
+      drawingToolsRef.current.deleteSelectedDrawing();
+      console.log('🗑️ Deleted selected drawing');
+    }
+  };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'Delete' && drawingToolsRef.current) {
+        handleDeleteSelectedDrawing();
+      }
+      if (event.key === 'Escape' && drawingMode !== 'none') {
+        handleDrawingModeChange('none');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [drawingMode]);
 
   // New indicator configuration functions
   const handleIndicatorSelect = (indicatorGroup, indicatorType) => {
@@ -574,6 +651,44 @@ const AdvancedCharts = () => {
   };
 
   // Memory cleanup function
+  // Setup chart hover handlers for candlestick data
+  const setupChartHoverHandlers = () => {
+    if (!engineRef.current) return;
+    
+    const mainChart = engineRef.current.getMainChart();
+    if (!mainChart) return;
+    
+    // Subscribe to crosshair move events
+    mainChart.subscribeCrosshairMove((param) => {
+      if (param.point && param.time) {
+        const data = param.seriesData;
+        const mainSeriesData = data.get(engineRef.current.getMainSeries()?.series);
+        
+        if (mainSeriesData && mainSeriesData.open !== undefined) {
+          const tooltipData = {
+            time: param.time,
+            open: mainSeriesData.open,
+            high: mainSeriesData.high,
+            low: mainSeriesData.low,
+            close: mainSeriesData.close,
+            volume: mainSeriesData.volume || 0
+          };
+          
+          setHoverData(tooltipData);
+          setCandleTooltip({
+            visible: true,
+            x: param.point.x,
+            y: param.point.y,
+            data: tooltipData
+          });
+        }
+      } else {
+        setCandleTooltip(prev => ({ ...prev, visible: false }));
+        setHoverData(null);
+      }
+    });
+  };
+
   const cleanupMemory = () => {
     // Clear indicators to free memory
     if (indicators.length > 5) {
@@ -771,20 +886,63 @@ const AdvancedCharts = () => {
               </Box>
             </Grid>
             
-            {/* Drawing Tools - Moved inline */}
+            {/* Enhanced Drawing Tools */}
             <Grid item>
-              <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', maxWidth: 400 }}>
-                {drawingTools.slice(0, 4).map(tool => (
-                  <Button
-                    key={tool.id}
-                    size="small"
-                    variant={drawingMode === tool.id ? 'contained' : 'outlined'}
-                    onClick={() => handleDrawingModeChange(tool.id)}
-                    sx={{ minWidth: 'auto', px: 1 }}
+              <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                <Tooltip title="Drawing Tools Panel">
+                  <IconButton 
+                    size="small" 
+                    onClick={() => setDrawingPanelOpen(!drawingPanelOpen)}
+                    color={drawingPanelOpen ? 'primary' : 'default'}
+                    sx={{ 
+                      border: drawingPanelOpen ? '1px solid #1976d2' : 'none',
+                      bgcolor: drawingPanelOpen ? 'rgba(25,118,210,0.1)' : 'transparent'
+                    }}
                   >
-                    <span style={{ fontSize: '12px' }}>{tool.icon}</span>
-                  </Button>
-                ))}
+                    <Brush />
+                  </IconButton>
+                </Tooltip>
+                
+                {/* Current Drawing Tool Status */}
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: 1,
+                  px: 1,
+                  py: 0.5,
+                  bgcolor: drawingMode !== 'none' ? 'primary.main' : 'background.default',
+                  color: drawingMode !== 'none' ? 'white' : 'text.primary',
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: drawingMode !== 'none' ? 'primary.main' : 'divider'
+                }}>
+                  <span style={{ fontSize: '14px' }}>
+                    {drawingTools.find(t => t.id === drawingMode)?.icon || '🖱️'}
+                  </span>
+                  <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
+                    {drawingTools.find(t => t.id === drawingMode)?.name || 'Select'}
+                  </Typography>
+                </Box>
+                
+                {/* Quick Access Cursor Tools */}
+                <Box sx={{ display: 'flex', gap: 0.5 }}>
+                  {drawingTools.filter(t => t.category === 'cursor').map(tool => (
+                    <Tooltip key={tool.id} title={tool.name}>
+                      <Button
+                        size="small"
+                        variant={drawingMode === tool.id ? 'contained' : 'outlined'}
+                        onClick={() => handleDrawingModeChange(tool.id)}
+                        sx={{ 
+                          minWidth: 'auto', 
+                          px: 1,
+                          border: drawingMode === tool.id ? '2px solid #1976d2' : '1px solid #ccc'
+                        }}
+                      >
+                        <span style={{ fontSize: '12px' }}>{tool.icon}</span>
+                      </Button>
+                    </Tooltip>
+                  ))}
+                </Box>
               </Box>
             </Grid>
           </Grid>
@@ -828,6 +986,39 @@ const AdvancedCharts = () => {
           }}
         />
         
+        {/* Candlestick Hover Tooltip */}
+        {candleTooltip.visible && candleTooltip.data && (
+          <Box 
+            sx={{ 
+              position: 'absolute',
+              left: candleTooltip.x + 15,
+              top: candleTooltip.y - 10,
+              bgcolor: 'rgba(0, 0, 0, 0.9)',
+              color: 'white',
+              p: 1.5,
+              borderRadius: 1,
+              fontSize: '12px',
+              zIndex: 1000,
+              minWidth: 180,
+              border: '1px solid #333',
+              boxShadow: '0 4px 8px rgba(0,0,0,0.3)'
+            }}
+          >
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
+              <Typography variant="caption" sx={{ color: '#888', gridColumn: '1 / -1' }}>
+                {new Date(candleTooltip.data.time * 1000).toLocaleDateString('fa-IR')}
+              </Typography>
+              <Typography variant="caption">باز: <strong style={{ color: '#4ECDC4' }}>{new Intl.NumberFormat('en-US').format(candleTooltip.data.open)}</strong></Typography>
+              <Typography variant="caption">بسته: <strong style={{ color: candleTooltip.data.close >= candleTooltip.data.open ? '#4CAF50' : '#F44336' }}>{new Intl.NumberFormat('en-US').format(candleTooltip.data.close)}</strong></Typography>
+              <Typography variant="caption">بالا: <strong style={{ color: '#FFD700' }}>{new Intl.NumberFormat('en-US').format(candleTooltip.data.high)}</strong></Typography>
+              <Typography variant="caption">پایین: <strong style={{ color: '#FF6B35' }}>{new Intl.NumberFormat('en-US').format(candleTooltip.data.low)}</strong></Typography>
+              {candleTooltip.data.volume > 0 && (
+                <Typography variant="caption" sx={{ gridColumn: '1 / -1' }}>حجم: <strong style={{ color: '#9C27B0' }}>{new Intl.NumberFormat('en-US').format(candleTooltip.data.volume)}</strong></Typography>
+              )}
+            </Box>
+          </Box>
+        )}
+
         {isLoading && (
           <Box 
             sx={{ 
@@ -846,6 +1037,190 @@ const AdvancedCharts = () => {
           </Box>
         )}
       </Box>
+      
+      {/* Enhanced Drawing Tools Panel - Floating Overlay */}
+      <Drawer
+        variant="temporary"
+        anchor="right"
+        open={drawingPanelOpen}
+        onClose={() => setDrawingPanelOpen(false)}
+        sx={{
+          '& .MuiDrawer-paper': {
+            width: 320,
+            boxSizing: 'border-box',
+            bgcolor: 'background.paper',
+            borderLeft: 1,
+            borderColor: 'divider',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+            backdropFilter: 'blur(10px)',
+            '& .MuiBackdrop-root': {
+              backgroundColor: 'rgba(0,0,0,0.3)',
+              backdropFilter: 'blur(4px)'
+            }
+          },
+          '& .MuiBackdrop-root': {
+            backgroundColor: 'rgba(0,0,0,0.3)',
+            backdropFilter: 'blur(4px)'
+          }
+        }}
+      >
+        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          {/* Modern Header */}
+          <Box sx={{ 
+            p: 3, 
+            bgcolor: 'primary.main', 
+            color: 'white',
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center'
+          }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Box sx={{ 
+                p: 1, 
+                borderRadius: '50%', 
+                bgcolor: 'rgba(255,255,255,0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <Brush />
+              </Box>
+              <Box>
+                <Typography variant="h6" fontWeight="bold">Drawing Tools</Typography>
+                <Typography variant="caption" sx={{ opacity: 0.8 }}>Professional Chart Analysis</Typography>
+              </Box>
+            </Box>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Tooltip title="Clear All Drawings">
+                <IconButton 
+                  size="small" 
+                  onClick={handleClearAllDrawings}
+                  sx={{ color: 'white', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}
+                >
+                  <Delete />
+                </IconButton>
+              </Tooltip>
+              <IconButton 
+                size="small" 
+                onClick={() => setDrawingPanelOpen(false)}
+                sx={{ color: 'white', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}
+              >
+                ×
+              </IconButton>
+            </Box>
+          </Box>
+          
+          {/* Scrollable Content */}
+          <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+          
+            {/* Instructions */}
+            <Card sx={{ mb: 2, bgcolor: 'info.light', color: 'info.contrastText' }}>
+              <CardContent sx={{ p: 1.5 }}>
+                <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 'bold' }}>
+                  🎯 راهنمای کلیدها
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
+                  • Delete: حذف رسم انتخاب شده<br/>
+                  • Escape: لغو حالت رسم<br/>
+                  • Click: رسم Fibonacci (2 کلیک برای Retracement، 3 کلیک برای Extension)
+                </Typography>
+              </CardContent>
+            </Card>
+          
+          {Object.entries(drawingCategories).map(([categoryId, categoryName]) => {
+            const categoryTools = drawingTools.filter(tool => tool.category === categoryId);
+            if (categoryTools.length === 0) return null;
+            
+            return (
+              <Card key={categoryId} sx={{ mb: 2, bgcolor: 'background.default' }}>
+                <CardContent sx={{ p: 2 }}>
+                  <Typography variant="subtitle2" sx={{ mb: 1, color: 'primary.main', fontWeight: 'bold' }}>
+                    {categoryName}
+                  </Typography>
+                  
+                  {/* Quick selection tip */}
+                  {categoryId === 'cursor' && (
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', mb: 1, display: 'block' }}>
+                      💡 انتخاب ابزار پنل را می‌بندد
+                    </Typography>
+                  )}
+                  
+                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1 }}>
+                    {categoryTools.map(tool => (
+                      <Tooltip key={tool.id} title={`${tool.name} - کلیک کنید (پنل بسته می‌شود)`}>
+                        <Button
+                          size="small"
+                          variant={drawingMode === tool.id ? 'contained' : 'outlined'}
+                          onClick={() => handleDrawingModeChange(tool.id)}
+                          sx={{ 
+                            minWidth: 'auto', 
+                            px: 1, 
+                            py: 0.5,
+                            flexDirection: 'column',
+                            height: 60,
+                            fontSize: '10px',
+                            position: 'relative',
+                            border: drawingMode === tool.id ? '2px solid #1976d2' : '1px solid #ccc',
+                            bgcolor: drawingMode === tool.id ? 'primary.main' : 'background.paper',
+                            color: drawingMode === tool.id ? 'white' : 'text.primary',
+                            boxShadow: drawingMode === tool.id ? '0 4px 8px rgba(25,118,210,0.3)' : 'none',
+                            transform: drawingMode === tool.id ? 'scale(1.05)' : 'scale(1)',
+                            transition: 'all 0.3s ease',
+                            '&:hover': {
+                              transform: 'scale(1.08)',
+                              boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+                            },
+                            '&:active': {
+                              transform: 'scale(0.95)',
+                              transition: 'all 0.1s ease'
+                            }
+                          }}
+                        >
+                          <span style={{ fontSize: '16px', marginBottom: '2px' }}>{tool.icon}</span>
+                          <span style={{ fontSize: '9px' }}>{tool.name.split(' ')[0]}</span>
+                          {drawingMode === tool.id && (
+                            <Box sx={{
+                              position: 'absolute',
+                              top: -2,
+                              right: -2,
+                              width: 8,
+                              height: 8,
+                              bgcolor: 'success.main',
+                              borderRadius: '50%',
+                              border: '1px solid white'
+                            }} />
+                          )}
+                        </Button>
+                      </Tooltip>
+                    ))}
+                  </Box>
+                </CardContent>
+              </Card>
+            );
+          })}
+          
+          {/* Drawing Controls */}
+          <Card sx={{ bgcolor: 'background.default' }}>
+            <CardContent sx={{ p: 2 }}>
+              <Typography variant="subtitle2" sx={{ mb: 1, color: 'secondary.main', fontWeight: 'bold' }}>
+                Controls
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <Button size="small" variant="outlined" onClick={() => drawingToolsRef.current?.clearAllDrawings()}>
+                  Clear All
+                </Button>
+                <Button size="small" variant="outlined" disabled>
+                  Undo (Coming Soon)
+                </Button>
+                <Button size="small" variant="outlined" disabled>
+                  Redo (Coming Soon)
+                </Button>
+              </Box>
+            </CardContent>
+          </Card>
+          </Box>
+        </Box>
+      </Drawer>
       
       {/* Right Sidebar - Indicators Panel */}
       <Drawer
@@ -913,111 +1288,173 @@ const AdvancedCharts = () => {
         </Box>
       </Drawer>
       
-      {/* Indicator Configuration Dialog - TradingView Style */}
+      {/* Enhanced Indicator Configuration Dialog - TradingView Style */}
       <Dialog 
         open={indicatorConfigDialogOpen} 
         onClose={() => setIndicatorConfigDialogOpen(false)}
-        maxWidth="sm"
+        maxWidth="md"
         fullWidth
+        sx={{
+          '& .MuiDialog-paper': {
+            bgcolor: 'background.paper',
+            minHeight: '500px'
+          }
+        }}
       >
-        <DialogTitle sx={{ pb: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <TrendingUp color="primary" />
-            <Typography variant="h6">
-              Configure {selectedIndicatorConfig?.name}
-            </Typography>
+        <DialogTitle sx={{ pb: 2, bgcolor: 'primary.main', color: 'white' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box sx={{ 
+              p: 1, 
+              borderRadius: '50%', 
+              bgcolor: 'rgba(255,255,255,0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <TrendingUp />
+            </Box>
+            <Box>
+              <Typography variant="h5" fontWeight="bold">
+                {selectedIndicatorConfig?.name}
+              </Typography>
+              <Typography variant="body2" sx={{ opacity: 0.8 }}>
+                Technical Analysis Indicator
+              </Typography>
+            </Box>
           </Box>
         </DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2 }}>
-            {selectedIndicatorConfig && Object.entries(selectedIndicatorConfig.params).map(([paramName, defaultValue]) => (
-              <Box key={paramName} sx={{ mb: 3 }}>
-                <Typography variant="subtitle2" gutterBottom sx={{ textTransform: 'capitalize' }}>
-                  {paramName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+        
+        <DialogContent sx={{ p: 3 }}>
+          {selectedIndicatorConfig && (
+            <Box sx={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 3, minHeight: '400px' }}>
+              {/* Parameters Section */}
+              <Box>
+                <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+                  <Settings color="primary" />
+                  Parameters
                 </Typography>
-                {typeof defaultValue === 'number' ? (
-                  <TextField
-                    fullWidth
-                    type="number"
-                    value={indicatorParams[paramName] || defaultValue}
-                    onChange={(e) => handleParamChange(paramName, parseFloat(e.target.value))}
-                    size="small"
-                    inputProps={{ 
-                      min: paramName === 'stdDev' ? 0.1 : 1,
-                      step: paramName === 'stdDev' ? 0.1 : 1,
-                      max: paramName === 'period' ? 200 : undefined
-                    }}
-                  />
-                ) : typeof defaultValue === 'string' ? (
-                  <TextField
-                    fullWidth
-                    value={indicatorParams[paramName] || defaultValue}
-                    onChange={(e) => handleParamChange(paramName, e.target.value)}
-                    size="small"
-                  />
-                ) : (
-                  <TextField
-                    fullWidth
-                    value={indicatorParams[paramName] || defaultValue}
-                    onChange={(e) => handleParamChange(paramName, e.target.value)}
-                    size="small"
-                  />
-                )}
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                  Default: {defaultValue}
-                </Typography>
-              </Box>
-            ))}
-            
-            {/* Color Selection */}
-            {selectedIndicatorConfig && (
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Line Color
-                </Typography>
-                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                  {['#FF6B35', '#4ECDC4', '#45B7D1', '#9B59B6', '#E74C3C', '#F39C12', '#2ECC71', '#34495E'].map(color => (
-                    <Box
-                      key={color}
-                      sx={{
-                        width: 32,
-                        height: 32,
-                        bgcolor: color,
-                        borderRadius: '50%',
-                        cursor: 'pointer',
-                        border: selectedIndicatorConfig.color === color ? '3px solid #fff' : '2px solid #ddd',
-                        boxShadow: selectedIndicatorConfig.color === color ? '0 0 0 2px #1976d2' : 'none'
-                      }}
-                      onClick={() => {
-                        setSelectedIndicatorConfig(prev => ({ ...prev, color }));
-                      }}
-                    />
+                
+                <Box sx={{ display: 'grid', gap: 3 }}>
+                  {Object.entries(selectedIndicatorConfig.params).map(([paramName, defaultValue]) => (
+                    <Card key={paramName} sx={{ p: 2, bgcolor: 'background.default' }}>
+                      <FormLabel sx={{ fontWeight: 'bold', mb: 1, display: 'block', textTransform: 'capitalize' }}>
+                        {paramName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                      </FormLabel>
+                      
+                      {typeof defaultValue === 'number' ? (
+                        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 2, alignItems: 'center' }}>
+                          <Slider
+                            value={indicatorParams[paramName] || defaultValue}
+                            onChange={(e, value) => handleParamChange(paramName, value)}
+                            min={paramName === 'stdDev' ? 0.1 : 1}
+                            max={paramName === 'period' ? 200 : paramName === 'stdDev' ? 5 : 50}
+                            step={paramName === 'stdDev' ? 0.1 : 1}
+                            sx={{ minWidth: 200 }}
+                          />
+                          <TextField
+                            type="number"
+                            value={indicatorParams[paramName] || defaultValue}
+                            onChange={(e) => handleParamChange(paramName, parseFloat(e.target.value))}
+                            size="small"
+                            sx={{ width: 80 }}
+                            inputProps={{ 
+                              min: paramName === 'stdDev' ? 0.1 : 1,
+                              step: paramName === 'stdDev' ? 0.1 : 1,
+                              max: paramName === 'period' ? 200 : undefined
+                            }}
+                          />
+                        </Box>
+                      ) : (
+                        <TextField
+                          fullWidth
+                          value={indicatorParams[paramName] || defaultValue}
+                          onChange={(e) => handleParamChange(paramName, e.target.value)}
+                          size="small"
+                        />
+                      )}
+                      
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                        Default: {defaultValue} | Current: {indicatorParams[paramName] || defaultValue}
+                      </Typography>
+                    </Card>
                   ))}
                 </Box>
               </Box>
-            )}
-            
-            {/* Preview */}
-            {selectedIndicatorConfig && (
-              <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1, mt: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Preview:
+              
+              {/* Style & Preview Section */}
+              <Box>
+                <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+                  <Brush color="secondary" />
+                  Style
                 </Typography>
-                <Typography variant="body1" sx={{ color: selectedIndicatorConfig.color, fontWeight: 'bold' }}>
-                  {selectedIndicatorConfig.displayName(indicatorParams)}
-                </Typography>
+                
+                {/* Color Selection */}
+                <Card sx={{ p: 2, bgcolor: 'background.default', mb: 3 }}>
+                  <FormLabel sx={{ fontWeight: 'bold', mb: 2, display: 'block' }}>
+                    Line Color
+                  </FormLabel>
+                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 1 }}>
+                    {['#FF6B35', '#4ECDC4', '#45B7D1', '#9B59B6', '#E74C3C', '#F39C12', '#2ECC71', '#34495E', '#FF9800', '#795548', '#9E9E9E', '#607D8B'].map(color => (
+                      <Tooltip key={color} title={color}>
+                        <Box
+                          sx={{
+                            width: 40,
+                            height: 40,
+                            bgcolor: color,
+                            borderRadius: 2,
+                            cursor: 'pointer',
+                            border: selectedIndicatorConfig.color === color ? '3px solid #fff' : '1px solid #ddd',
+                            boxShadow: selectedIndicatorConfig.color === color ? '0 0 0 2px #1976d2' : 'none',
+                            transition: 'all 0.2s ease'
+                          }}
+                          onClick={() => {
+                            setSelectedIndicatorConfig(prev => ({ ...prev, color }));
+                          }}
+                        />
+                      </Tooltip>
+                    ))}
+                  </Box>
+                </Card>
+                
+                {/* Preview */}
+                <Card sx={{ p: 3, bgcolor: 'background.default' }}>
+                  <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                    Preview
+                  </Typography>
+                  <Box sx={{ 
+                    p: 2, 
+                    bgcolor: '#0d1421', 
+                    borderRadius: 2, 
+                    color: 'white',
+                    textAlign: 'center',
+                    minHeight: 60,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center'
+                  }}>
+                    <Typography variant="h6" sx={{ color: selectedIndicatorConfig.color, fontWeight: 'bold' }}>
+                      {selectedIndicatorConfig.displayName(indicatorParams)}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#888', mt: 1 }}>
+                      Will be added to chart
+                    </Typography>
+                  </Box>
+                </Card>
               </Box>
-            )}
-          </Box>
+            </Box>
+          )}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setIndicatorConfigDialogOpen(false)}>
+        
+        <DialogActions sx={{ p: 3, bgcolor: 'background.default' }}>
+          <Button onClick={() => setIndicatorConfigDialogOpen(false)} color="inherit">
             Cancel
           </Button>
           <Button 
             onClick={handleIndicatorConfigConfirm}
             variant="contained"
+            size="large"
             startIcon={<TrendingUp />}
+            sx={{ px: 4 }}
           >
             Add Indicator
           </Button>

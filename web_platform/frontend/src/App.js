@@ -59,7 +59,14 @@ const darkTheme = createTheme({
     },
   },
   typography: {
-    fontFamily: '"Segoe UI", "Roboto", sans-serif',
+    fontFamily: '"IRANSans", "Segoe UI", "Roboto", sans-serif',
+    fontFamilyFallback: [
+      'IRANSans',
+      'Segoe UI',
+      'Roboto',
+      'Arial',
+      'sans-serif'
+    ],
   },
   components: {
     MuiCssBaseline: {

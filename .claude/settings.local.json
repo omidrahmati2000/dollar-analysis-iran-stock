@@ -56,7 +56,16 @@
       "Bash(start test-api-integration.html)",
       "Bash(start advanced-charts-integration-test.html)",
       "Bash(start advanced-charts-fix-verification.html)",
-      "Bash(start:*)"
+      "Bash(start:*)",
+      "Bash(tasklist:*)",
+      "Bash(net stop:*)",
+      "Bash(net start:*)",
+      "Bash(wsl:*)",
+      "Bash(sc query:*)",
+      "Bash(eventcreate:*)",
+      "Bash(sc start:*)",
+      "Bash(node:*)",
+      "Bash(git restore:*)"
     ],
     "deny": [],
     "ask": []

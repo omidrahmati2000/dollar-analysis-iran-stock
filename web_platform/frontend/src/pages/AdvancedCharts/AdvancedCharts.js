@@ -52,6 +52,7 @@ import MultiPanelChartEngine from '../../components/AdvancedChart/MultiPanelChar
 import DrawingTools from '../../components/AdvancedChart/DrawingTools';
 import EnhancedHistoricalDataService from '../../services/EnhancedHistoricalDataService';
 import benchmark from '../../utils/PerformanceBenchmark';
+import AdvancedSymbolSearch from '../../components/AdvancedSymbolSearch/AdvancedSymbolSearch';
 
 const AdvancedCharts = () => {
   const chartContainerRef = useRef(null);
@@ -387,18 +388,17 @@ const AdvancedCharts = () => {
         { adjusted: adjustedData }
       );
       
-      // Set chart data - use the updateMainData method we added
+      // Set chart data - use the updateMainChartData method
       if (data && data.length > 0) {
         // Ensure we have a main series, create if needed
         let mainSeries = engineRef.current.getMainSeries();
         if (!mainSeries) {
-          // Create initial candlestick series for main panel
           const seriesResult = engineRef.current.createCandlestickSeries('main');
           mainSeries = { seriesId: seriesResult.seriesId };
         }
         
-        // Update the main chart data
-        engineRef.current.updateMainData(data);
+        // Update the main chart data using correct method
+        engineRef.current.updateMainChartData(data);
         
         // Save last data point for Live Quote display
         if (data.length > 0) {
@@ -604,72 +604,16 @@ const AdvancedCharts = () => {
         {/* Top Toolbar */}
         <Paper sx={{ p: 0.5, borderRadius: 0, bgcolor: 'background.paper', borderBottom: 1, borderColor: 'divider' }} data-testid="chart-toolbar">
           <Grid container spacing={1} alignItems="center">
-            <Grid item>
-              <FormControl size="small" sx={{ minWidth: 200 }}>
-                <InputLabel>Symbol</InputLabel>
-                <Select
-                  value={selectedSymbol}
-                  onChange={(e) => setSelectedSymbol(e.target.value)}
-                  label="Symbol"
-                  renderValue={(selected) => {
-                    const quote = symbolQuotes[selected];
-                    if (quote) {
-                      const changeColor = (quote.change || 0) >= 0 ? '#4caf50' : '#f44336';
-                      return (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Typography variant="body2" fontWeight="bold">{selected}</Typography>
-                          <Typography variant="caption" sx={{ color: changeColor }}>
-                            {quote.price?.toLocaleString()}
-                            {quote.changePercent && ` (${quote.changePercent > 0 ? '+' : ''}${quote.changePercent.toFixed(2)}%)`}
-                          </Typography>
-                        </Box>
-                      );
-                    }
-                    return selected;
-                  }}
-                >
-                  {symbols.map(symbol => {
-                    const quote = symbolQuotes[symbol];
-                    const changeColor = (quote?.change || 0) >= 0 ? '#4caf50' : '#f44336';
-                    return (
-                      <MenuItem key={symbol} value={symbol}>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-                            <Typography variant="body2" fontWeight="bold">{symbol}</Typography>
-                            {quote && (
-                              <Typography variant="caption" sx={{ color: changeColor }}>
-                                {quote.price?.toLocaleString()}
-                              </Typography>
-                            )}
-                          </Box>
-                          {quote && (
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-                              <Typography variant="caption" color="text.secondary" sx={{ maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {quote.name}
-                              </Typography>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                <Typography variant="caption" sx={{ color: changeColor }}>
-                                  {quote.changePercent ? `${quote.changePercent > 0 ? '+' : ''}${quote.changePercent.toFixed(2)}%` : ''}
-                                </Typography>
-                                <Chip 
-                                  size="small" 
-                                  label={quote.type === 'stock' ? 'سهام' : 'ارز'} 
-                                  sx={{ 
-                                    height: 16, 
-                                    fontSize: '0.6rem',
-                                    bgcolor: quote.type === 'stock' ? '#1976d2' : '#ff9800',
-                                    color: 'white'
-                                  }} 
-                                />
-                              </Box>
-                            </Box>
-                          )}
-                        </Box>
-                      </MenuItem>
-                    );
-                  })}
-                </Select>
-              </FormControl>
+            <Grid item xs={12} sm={6} md={4}>
+              <AdvancedSymbolSearch
+                placeholder="جستجوی سهام و ارز..."
+                selectedSymbol={selectedSymbol}
+                onSelect={(item, type) => {
+                  const symbol = type === 'stock' ? item.symbol : item.currency_code;
+                  setSelectedSymbol(symbol);
+                }}
+                sx={{ minWidth: 300 }}
+              />
             </Grid>
             
             <Grid item>

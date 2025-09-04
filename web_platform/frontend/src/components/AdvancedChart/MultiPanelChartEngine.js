@@ -1,4 +1,5 @@
 import { createChart } from 'lightweight-charts';
+import { createPersianTimeFormatter } from '../../utils/PersianDateUtils';
 
 class MultiPanelChartEngine {
     constructor(container, options = {}) {
@@ -13,6 +14,7 @@ class MultiPanelChartEngine {
         
         this.options = {
             darkMode: options.darkMode || false,
+            timeframe: options.timeframe || '1D', // Add timeframe for Persian date formatting
             ...options
         };
         
@@ -26,6 +28,7 @@ class MultiPanelChartEngine {
         this.createMainPanel();
         this.setupEventListeners();
         this.setupResizeObserver();
+        this.setupVisibleRangeHandler();
     }
 
     setupContainer() {
@@ -153,6 +156,9 @@ class MultiPanelChartEngine {
                 secondsVisible: false,
                 fixLeftEdge: true,
                 fixRightEdge: true,
+                ticksVisible: true,
+                // Use Persian date formatting
+                tickMarkFormatter: createPersianTimeFormatter(this.options.timeframe),
             },
             handleScroll: {
                 mouseWheel: true,
@@ -225,6 +231,34 @@ class MultiPanelChartEngine {
         });
         
         this.resizeObserver.observe(this.container);
+    }
+
+    setupVisibleRangeHandler() {
+        const mainPanel = this.panels.get('main');
+        if (!mainPanel) return;
+
+        // Track visible range changes for auto-loading
+        mainPanel.chart.timeScale().subscribeVisibleTimeRangeChange((visibleRange) => {
+            if (!visibleRange || !this.mainChartData || this.mainChartData.length === 0) return;
+
+            // Get the oldest and newest data points
+            const oldestDataTime = this.mainChartData[0].time;
+            const newestDataTime = this.mainChartData[this.mainChartData.length - 1].time;
+            
+            // Check if user scrolled to the beginning (left edge) - load older data
+            if (visibleRange.from <= oldestDataTime) {
+                if (this.onLoadOlderData) {
+                    this.onLoadOlderData(oldestDataTime);
+                }
+            }
+            
+            // Check if user scrolled to the end (right edge) - load newer data
+            if (visibleRange.to >= newestDataTime) {
+                if (this.onLoadNewerData) {
+                    this.onLoadNewerData(newestDataTime);
+                }
+            }
+        });
     }
 
     updatePanelSizes() {
@@ -526,6 +560,63 @@ class MultiPanelChartEngine {
                     });
                     if (data && data.length > 0) {
                         series.setData(data.map(d => ({ time: d.time, value: d.volume })));
+                    }
+                    break;
+
+                case 'stochastic':
+                    // Stochastic %K and %D lines
+                    const stochData = this.calculateStochastic(data, options.kPeriod || 14, options.dPeriod || 3);
+                    series = panel.chart.addLineSeries({
+                        color: options.color || '#F39C12',
+                        title: `Stoch %K(${options.kPeriod || 14})`
+                    });
+                    if (stochData.kData.length > 0) {
+                        series.setData(stochData.kData);
+                    }
+                    
+                    // Add %D line
+                    const dSeries = panel.chart.addLineSeries({
+                        color: options.color2 || '#E74C3C',
+                        title: `Stoch %D(${options.dPeriod || 3})`
+                    });
+                    if (stochData.dData.length > 0) {
+                        dSeries.setData(stochData.dData);
+                    }
+                    break;
+
+                case 'cci':
+                    // CCI oscillator
+                    const cciData = this.calculateCCI(data, options.period || 20);
+                    series = panel.chart.addLineSeries({
+                        color: options.color || '#E67E22',
+                        title: `CCI(${options.period || 20})`
+                    });
+                    if (cciData.length > 0) {
+                        series.setData(cciData);
+                    }
+                    break;
+
+                case 'williams':
+                    // Williams %R
+                    const williamsData = this.calculateWilliamsR(data, options.period || 14);
+                    series = panel.chart.addLineSeries({
+                        color: options.color || '#3498DB',
+                        title: `Williams %R(${options.period || 14})`
+                    });
+                    if (williamsData.length > 0) {
+                        series.setData(williamsData);
+                    }
+                    break;
+
+                case 'wma':
+                    // Weighted Moving Average
+                    const wmaData = this.calculateWMA(data, options.period || 20);
+                    series = panel.chart.addLineSeries({
+                        color: options.color || '#8E44AD',
+                        title: `WMA(${options.period || 20})`
+                    });
+                    if (wmaData.length > 0) {
+                        series.setData(wmaData);
                     }
                     break;
                     
@@ -1044,12 +1135,6 @@ class MultiPanelChartEngine {
                         color: '#2196f3',
                         lineWidth: 2,
                     });
-                    // For line chart, use close prices
-                    const lineData = this.mainChartData.map(item => ({
-                        time: item.time,
-                        value: item.close
-                    }));
-                    newSeries.setData(lineData);
                     break;
                     
                 case 'area':
@@ -1059,12 +1144,6 @@ class MultiPanelChartEngine {
                         lineColor: '#2196f3',
                         lineWidth: 2,
                     });
-                    // For area chart, use close prices
-                    const areaData = this.mainChartData.map(item => ({
-                        time: item.time,
-                        value: item.close
-                    }));
-                    newSeries.setData(areaData);
                     break;
                     
                 case 'ohlc':
@@ -1102,9 +1181,33 @@ class MultiPanelChartEngine {
                     });
             }
 
-            // Set data for candlestick and OHLC types
-            if (['candlestick', 'ohlc', 'bars'].includes(type) && type !== 'heikinashi') {
-                newSeries.setData(this.mainChartData);
+            // Set data based on chart type
+            if (this.mainChartData && this.mainChartData.length > 0) {
+                switch (type) {
+                    case 'line':
+                        const lineData = this.mainChartData.map(item => ({
+                            time: item.time,
+                            value: item.close
+                        }));
+                        newSeries.setData(lineData);
+                        break;
+                        
+                    case 'area':
+                        const areaData = this.mainChartData.map(item => ({
+                            time: item.time,
+                            value: item.close
+                        }));
+                        newSeries.setData(areaData);
+                        break;
+                        
+                    case 'candlestick':
+                    case 'ohlc':
+                    case 'bars':
+                        if (type !== 'heikinashi') {
+                            newSeries.setData(this.mainChartData);
+                        }
+                        break;
+                }
             }
 
             // Store new series
@@ -1171,26 +1274,83 @@ class MultiPanelChartEngine {
         // Find the main candlestick or line series
         for (const [seriesId, seriesInfo] of this.series) {
             if (seriesInfo.panel === 'main' && 
-                ['candlestick', 'line', 'area'].includes(seriesInfo.type)) {
-                return { seriesId, seriesInfo };
+                (seriesInfo.type === 'main' || 
+                 ['candlestick', 'line', 'area'].includes(seriesInfo.type))) {
+                return { 
+                    seriesId, 
+                    series: seriesInfo.series,
+                    seriesInfo 
+                };
             }
         }
         return null;
     }
 
-    // Update main chart data
-    updateMainData(data) {
-        const mainSeries = this.getMainSeries();
-        if (mainSeries) {
-            this.setData(mainSeries.seriesId, data);
-            // Store the data for indicator calculations
-            this.mainChartData = data;
-        }
-    }
-
     // Get main chart data for indicator calculations
     getData() {
         return this.mainChartData || [];
+    }
+
+    // Update chart data
+    updateMainChartData(data) {
+        if (!data || data.length === 0) return;
+        
+        this.mainChartData = data;
+        const mainSeries = this.getMainSeries();
+        if (mainSeries?.series) {
+            // Handle different chart types
+            const chartType = mainSeries.seriesInfo.chartType || 'candlestick';
+            
+            switch (chartType) {
+                case 'line':
+                    const lineData = data.map(item => ({
+                        time: item.time,
+                        value: item.close
+                    }));
+                    mainSeries.series.setData(lineData);
+                    break;
+                    
+                case 'area':
+                    const areaData = data.map(item => ({
+                        time: item.time,
+                        value: item.close
+                    }));
+                    mainSeries.series.setData(areaData);
+                    break;
+                    
+                default:
+                    mainSeries.series.setData(data);
+                    break;
+            }
+        }
+    }
+
+    // Append older data to the beginning
+    appendOlderData(olderData) {
+        if (!olderData || olderData.length === 0) return;
+        
+        // Merge older data with existing data, avoiding duplicates
+        const existingTimes = new Set(this.mainChartData.map(d => d.time));
+        const newOlderData = olderData.filter(d => !existingTimes.has(d.time));
+        
+        if (newOlderData.length > 0) {
+            this.mainChartData = [...newOlderData, ...this.mainChartData].sort((a, b) => a.time - b.time);
+            this.updateMainChartData(this.mainChartData);
+        }
+    }
+
+    // Append newer data to the end
+    appendNewerData(newerData) {
+        if (!newerData || newerData.length === 0) return;
+        
+        // Merge newer data with existing data, avoiding duplicates
+        const existingTimes = new Set(this.mainChartData.map(d => d.time));
+        const newNewerData = newerData.filter(d => !existingTimes.has(d.time));
+        
+        if (newNewerData.length > 0) {
+            this.mainChartData = [...this.mainChartData, ...newNewerData].sort((a, b) => a.time - b.time);
+            this.updateMainChartData(this.mainChartData);
+        }
     }
 
     // Cleanup
@@ -1217,10 +1377,135 @@ class MultiPanelChartEngine {
         }
     }
 
+    // Additional calculation methods for new indicators
+    calculateWMA(data, period) {
+        const result = [];
+        for (let i = period - 1; i < data.length; i++) {
+            let weightedSum = 0;
+            let weightSum = 0;
+            
+            for (let j = 0; j < period; j++) {
+                const weight = j + 1;
+                weightedSum += data[i - period + 1 + j].close * weight;
+                weightSum += weight;
+            }
+            
+            result.push({
+                time: data[i].time,
+                value: weightedSum / weightSum
+            });
+        }
+        return result;
+    }
+
+    calculateStochastic(data, kPeriod = 14, dPeriod = 3) {
+        const kData = [];
+        const dData = [];
+        
+        // Calculate %K
+        for (let i = kPeriod - 1; i < data.length; i++) {
+            let highestHigh = -Infinity;
+            let lowestLow = Infinity;
+            
+            for (let j = 0; j < kPeriod; j++) {
+                const idx = i - kPeriod + 1 + j;
+                highestHigh = Math.max(highestHigh, data[idx].high);
+                lowestLow = Math.min(lowestLow, data[idx].low);
+            }
+            
+            const k = ((data[i].close - lowestLow) / (highestHigh - lowestLow)) * 100;
+            kData.push({
+                time: data[i].time,
+                value: k
+            });
+        }
+        
+        // Calculate %D (SMA of %K)
+        for (let i = dPeriod - 1; i < kData.length; i++) {
+            let sum = 0;
+            for (let j = 0; j < dPeriod; j++) {
+                sum += kData[i - dPeriod + 1 + j].value;
+            }
+            
+            dData.push({
+                time: kData[i].time,
+                value: sum / dPeriod
+            });
+        }
+        
+        return { kData, dData };
+    }
+
+    calculateCCI(data, period = 20) {
+        const result = [];
+        const typicalPrices = data.map(d => (d.high + d.low + d.close) / 3);
+        
+        for (let i = period - 1; i < data.length; i++) {
+            // Calculate SMA of typical price
+            let sum = 0;
+            for (let j = 0; j < period; j++) {
+                sum += typicalPrices[i - period + 1 + j];
+            }
+            const sma = sum / period;
+            
+            // Calculate mean deviation
+            let deviation = 0;
+            for (let j = 0; j < period; j++) {
+                deviation += Math.abs(typicalPrices[i - period + 1 + j] - sma);
+            }
+            const meanDeviation = deviation / period;
+            
+            const cci = (typicalPrices[i] - sma) / (0.015 * meanDeviation);
+            
+            result.push({
+                time: data[i].time,
+                value: cci
+            });
+        }
+        
+        return result;
+    }
+
+    calculateWilliamsR(data, period = 14) {
+        const result = [];
+        
+        for (let i = period - 1; i < data.length; i++) {
+            let highestHigh = -Infinity;
+            let lowestLow = Infinity;
+            
+            for (let j = 0; j < period; j++) {
+                const idx = i - period + 1 + j;
+                highestHigh = Math.max(highestHigh, data[idx].high);
+                lowestLow = Math.min(lowestLow, data[idx].low);
+            }
+            
+            const williamsR = ((highestHigh - data[i].close) / (highestHigh - lowestLow)) * -100;
+            
+            result.push({
+                time: data[i].time,
+                value: williamsR
+            });
+        }
+        
+        return result;
+    }
+
+    // Update timeframe for Persian date formatting
+    updateTimeframe(timeframe) {
+        this.options.timeframe = timeframe;
+        const newOptions = this.getChartOptions();
+        
+        this.panels.forEach(panel => {
+            panel.chart.applyOptions(newOptions);
+        });
+    }
+
     // Event handlers (to be overridden)
     onCrosshairMove = null;
     onChartClick = null;
     onTimeRangeChange = null;
+    onLoadOlderData = null;
+    onLoadNewerData = null;
 }
 
 export default MultiPanelChartEngine;

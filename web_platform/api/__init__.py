@@ -17,7 +17,7 @@ from .backtest import router as backtest_router
 api_router = APIRouter()
 
 # Include all route modules
-api_router.include_router(market_data_router, prefix="/market", tags=["Market Data"])
+api_router.include_router(market_data_router, prefix="/market-data", tags=["Market Data"])
 api_router.include_router(indicators_router, prefix="/indicators", tags=["Technical Indicators"])
 api_router.include_router(portfolio_router, prefix="/portfolio", tags=["Portfolio Management"])
 api_router.include_router(watchlist_router, prefix="/watchlist", tags=["Watchlist"])

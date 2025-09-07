@@ -62,19 +62,28 @@ class BaseRepository:
     def execute_query(self, query: str, params: tuple = None) -> list:
         """Execute a SELECT query and return results"""
         with self.get_cursor() as cursor:
-            cursor.execute(query, params)
+            if params is None:
+                cursor.execute(query)
+            else:
+                cursor.execute(query, params)
             return cursor.fetchall()
     
     def execute_one(self, query: str, params: tuple = None) -> Optional[dict]:
         """Execute a SELECT query and return single result"""
         with self.get_cursor() as cursor:
-            cursor.execute(query, params)
+            if params is None:
+                cursor.execute(query)
+            else:
+                cursor.execute(query, params)
             return cursor.fetchone()
     
     def execute_update(self, query: str, params: tuple = None) -> int:
         """Execute an UPDATE/INSERT/DELETE query and return affected rows"""
         with self.get_cursor() as cursor:
-            cursor.execute(query, params)
+            if params is None:
+                cursor.execute(query)
+            else:
+                cursor.execute(query, params)
             return cursor.rowcount
     
     def test_connection(self) -> bool:

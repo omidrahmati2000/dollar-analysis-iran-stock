@@ -301,7 +301,10 @@ async def get_ohlcv_data(
     timeframe: str = Query("1d", description="Timeframe: 1d (daily), 1w (weekly), 1m (monthly), 1y (yearly)"),
     from_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD format)"),
     to_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD format)"),
-    limit: Optional[int] = Query(None, ge=1, le=10000, description="Maximum number of data points to return")
+    limit: Optional[int] = Query(None, ge=1, le=10000, description="Maximum number of data points to return"),
+    before_date: Optional[str] = Query(None, description="Get data before this date (for infinite scroll backward)"),
+    after_date: Optional[str] = Query(None, description="Get data after this date (for infinite scroll forward)"),
+    cursor: Optional[str] = Query(None, description="Cursor for pagination (format: timestamp_direction, e.g., '1693526400_before')")
 ):
     """Get OHLCV data for a stock with timeframe and pagination support"""
     try:
@@ -311,7 +314,10 @@ async def get_ohlcv_data(
             timeframe=timeframe,
             from_date=from_date,
             to_date=to_date,
-            limit=limit
+            limit=limit,
+            before_date=before_date,
+            after_date=after_date,
+            cursor=cursor
         )
         return ohlcv
     except Exception as e:

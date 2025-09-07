@@ -136,6 +136,221 @@ class EnhancedHistoricalDataService {
             return this._getHistoricalDataInternal(symbol, timeframe, from, to, useCache);
         });
     }
+
+    /**
+     * Get historical data with pagination support for infinite scroll
+     */
+    async getHistoricalDataPaginated(symbol, timeframe = '1D', options = {}) {
+        const {
+            beforeDate = null,
+            afterDate = null,
+            limit = 200,
+            useCache = true
+        } = options;
+
+        return this.throttleRequest(async () => {
+            return this._getHistoricalDataPaginatedInternal(symbol, timeframe, beforeDate, afterDate, limit, useCache);
+        });
+    }
+
+    async _getHistoricalDataPaginatedInternal(symbol, timeframe, beforeDate, afterDate, limit, useCache) {
+        const cacheKey = this.getCacheKey(symbol, timeframe, beforeDate || 'null', afterDate || 'null') + `_${limit}`;
+        
+        // Check memory cache first
+        if (useCache && this.cache.has(cacheKey)) {
+            const cached = this.cache.get(cacheKey);
+            if (Date.now() - cached.timestamp < this.cacheTimeout) {
+                return cached.data;
+            }
+        }
+
+        try {
+            // Build query parameters for API v2 (doesn't support before_date/after_date)
+            const params = new URLSearchParams({
+                timeframe: this.mapTimeframeToBackend(timeframe),
+                limit: limit.toString()
+            });
+
+            // API v2 doesn't support cursor-based pagination, so we use date range instead
+            if (beforeDate) {
+                // Convert ISO date to Persian date for from_date parameter
+                const date = new Date(beforeDate);
+                const persianDate = this.gregorianToPersianDate(date);
+                params.append('to_date', persianDate);
+                // Get more data to allow for pagination
+                params.set('limit', (limit * 2).toString());
+            } else if (afterDate) {
+                const date = new Date(afterDate);
+                const persianDate = this.gregorianToPersianDate(date);
+                params.append('from_date', persianDate);
+                params.set('limit', (limit * 2).toString());
+            }
+
+            // Get real data from backend
+            const result = await this.fetchPaginatedData(symbol, params);
+            
+            // Cache the result
+            if (useCache && result) {
+                this.cache.set(cacheKey, {
+                    data: result,
+                    timestamp: Date.now()
+                });
+                this.manageCacheSize();
+            }
+
+            return result;
+
+        } catch (error) {
+            console.error('Error fetching paginated historical data:', error);
+            return {
+                data: [],
+                pagination: {
+                    has_more: false,
+                    next_cursor: null,
+                    prev_cursor: null
+                }
+            };
+        }
+    }
+
+    mapTimeframeToBackend(timeframe) {
+        const timeframeMap = {
+            '1m': '1d',  // Use daily for minute data
+            '5m': '1d',  // Use daily for 5min data  
+            '15m': '1d', // Use daily for 15min data
+            '1h': '1d',  // Use daily for hourly data
+            '4h': '1d',  // Use daily for 4h data
+            '1D': '1d',  // Daily
+            '1W': '1w',  // Weekly
+            '1M': '1m'   // Monthly
+        };
+        return timeframeMap[timeframe] || '1d';
+    }
+
+    /**
+     * Parse Persian date string to Unix timestamp (seconds)
+     * Uses a more accurate Solar Hijri to Gregorian conversion
+     */
+    parsePersianDate(persianDateStr) {
+        try {
+            // Persian date format is typically "1403-06-12"
+            if (!persianDateStr || typeof persianDateStr !== 'string') {
+                return 0;
+            }
+
+            const parts = persianDateStr.split('-');
+            if (parts.length !== 3) {
+                return 0;
+            }
+
+            const persianYear = parseInt(parts[0]);
+            const persianMonth = parseInt(parts[1]);
+            const persianDay = parseInt(parts[2]);
+
+            // More accurate Solar Hijri to Gregorian conversion
+            let gregorianYear = persianYear + 621;
+            let gregorianMonth, gregorianDay = persianDay;
+            
+            // Adjust for Persian new year starting around March 21
+            if (persianMonth <= 6) {
+                // First 6 months (Farvardin-Shahrivar) -> March-August
+                gregorianMonth = persianMonth + 2; // Month 1 -> March (3)
+            } else if (persianMonth <= 9) {
+                // Months 7-9 (Mehr-Azar) -> September-November
+                gregorianMonth = persianMonth + 2; // Month 7 -> September (9)
+            } else if (persianMonth <= 12) {
+                // Last 3 months (Dey-Esfand) -> December-February of next year
+                if (persianMonth === 10) gregorianMonth = 12; // Dey -> December
+                else {
+                    gregorianMonth = persianMonth - 10; // Month 11 -> January (1), Month 12 -> February (2)
+                    gregorianYear += 1;
+                }
+            }
+            
+            // Ensure valid ranges
+            gregorianMonth = Math.max(1, Math.min(12, gregorianMonth));
+            gregorianDay = Math.max(1, Math.min(30, gregorianDay)); // Allow up to 30 days
+
+            const gregorianDate = new Date(gregorianYear, gregorianMonth - 1, gregorianDay);
+            
+            // Return Unix timestamp in seconds (TradingView format)
+            return Math.floor(gregorianDate.getTime() / 1000);
+        } catch (error) {
+            console.warn('Error parsing Persian date:', persianDateStr, error);
+            return 0;
+        }
+    }
+
+    /**
+     * Convert Gregorian date to Persian date string (simplified conversion)
+     */
+    gregorianToPersianDate(gregorianDate) {
+        try {
+            // This is a very simplified conversion
+            // For production, use a proper Persian calendar library
+            const year = gregorianDate.getFullYear() - 621;
+            const month = gregorianDate.getMonth() + 1;
+            const day = gregorianDate.getDate();
+
+            return `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+        } catch (error) {
+            console.warn('Error converting to Persian date:', error);
+            return '1403-01-01'; // Fallback date
+        }
+    }
+
+    async fetchPaginatedData(symbol, params) {
+        const encodedSymbol = encodeURIComponent(symbol);
+        const url = `http://localhost:8000/api/v2/stocks/${encodedSymbol}/ohlcv?${params.toString()}`;
+        
+        console.log(`🔄 Fetching paginated data from: ${url}`);
+        
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+            timeout: 30000
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        
+        if (Array.isArray(result) && result.length > 0) {
+            // Transform trading platform API v2 data format
+            const transformedData = result.map(item => ({
+                time: this.parsePersianDate(item.date), // Convert Persian date to timestamp
+                open: parseFloat(item.open_price) || 0,
+                high: parseFloat(item.high_price) || 0, 
+                low: parseFloat(item.low_price) || 0,
+                close: parseFloat(item.close_price) || 0,
+                volume: parseInt(item.volume) || 0
+            })).filter(item => item.time > 0); // Filter out invalid dates
+
+            // For now, return all data without pagination since API v2 doesn't support cursor-based pagination
+            return {
+                data: transformedData,
+                pagination: {
+                    has_more: transformedData.length >= (parseInt(params.get('limit')) || 100),
+                    next_cursor: transformedData.length > 0 ? transformedData[transformedData.length - 1].time : null,
+                    prev_cursor: transformedData.length > 0 ? transformedData[0].time : null
+                }
+            };
+        }
+
+        return {
+            data: [],
+            pagination: {
+                has_more: false,
+                next_cursor: null,
+                prev_cursor: null
+            }
+        };
+    }
     
     async _getHistoricalDataInternal(symbol, timeframe = '1D', from = null, to = null, useCache = true) {
         const cacheKey = this.getCacheKey(symbol, timeframe, from, to);
@@ -162,11 +377,24 @@ class EnhancedHistoricalDataService {
             if (to) params.append('to', to);
 
             // Try to get real data first
+            console.log(`📊 Attempting to fetch real data for ${symbol}...`);
+            console.log(`🔧 DEBUG: Cache cleared for symbol ${symbol}`);
+            this.cache.clear(); // Clear cache to ensure fresh data
             let data = await this.tryRealHistoricalData(symbol, params);
             
             // Fallback to enhanced mock data if no real data
             if (!data || data.length === 0) {
+                console.warn(`⚠️ No real data found for ${symbol}, using mock data instead`);
                 data = await this.generateEnhancedMockData(symbol, timeframe, from, to);
+                console.log(`🎭 Generated mock data for ${symbol}:`, data.length, 'points');
+                if (data.length > 0) {
+                    console.log(`🎭 First mock record:`, data[0]);
+                }
+            } else {
+                console.log(`✅ Using real data for ${symbol}: ${data.length} points`);
+                if (data.length > 0) {
+                    console.log(`✅ First real record being used:`, data[0]);
+                }
             }
 
             // Apply data validation and cleaning
@@ -198,6 +426,8 @@ class EnhancedHistoricalDataService {
 
     async tryRealHistoricalData(symbol, params) {
         try {
+            console.log(`🔍 tryRealHistoricalData called with symbol: "${symbol}" (${typeof symbol})`);
+            
             // Convert timeframe parameter to match backend expectations
             const backendParams = new URLSearchParams(params);
             const timeframe = backendParams.get('timeframe') || '1D';
@@ -244,12 +474,17 @@ class EnhancedHistoricalDataService {
             if (response.ok) {
                 const result = await response.json();
                 console.log(`✅ Real data received for ${symbol}:`, result.length, 'records');
+                console.log(`📊 First record from backend:`, result[0]);
                 
                 if (result && Array.isArray(result) && result.length > 0) {
-                    return this.transformDataFormat(result);
+                    const transformedData = this.transformDataFormat(result);
+                    console.log(`🔄 Transformed data for ${symbol}:`, transformedData.length, 'records');
+                    console.log(`💰 First transformed record:`, transformedData[0]);
+                    return transformedData;
                 }
             } else {
                 console.warn(`❌ Backend returned ${response.status} for ${symbol}`);
+                console.warn(`❌ Response text:`, await response.text());
             }
             
             // If no real data, return null to use mock data
@@ -271,7 +506,13 @@ class EnhancedHistoricalDataService {
             let timestamp;
             
             if (typeof timeValue === 'string') {
-                timestamp = Math.floor(new Date(timeValue).getTime() / 1000);
+                // Check if it's a Persian date (format: YYYY-MM-DD where year is > 1300 and < 1500)
+                if (timeValue.match(/^1[34]\d{2}-\d{2}-\d{2}$/)) {
+                    timestamp = this.parsePersianDate(timeValue);
+                } else {
+                    // Try standard date parsing
+                    timestamp = Math.floor(new Date(timeValue).getTime() / 1000);
+                }
             } else if (typeof timeValue === 'number') {
                 // If already a timestamp, convert to seconds if needed
                 timestamp = timeValue > 1e10 ? Math.floor(timeValue / 1000) : timeValue;

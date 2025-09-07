@@ -105,12 +105,17 @@ class StockService:
             # Service layer adds business logic like relevance scoring
             formatted_results = []
             for result in results:
-                formatted_results.append({
+                formatted_result = {
                     'symbol': result['symbol'],
                     'company_name': result.get('company_name', result['symbol']),
+                    'last_price': float(result.get('last_price', 0)),
+                    'price_change': float(result.get('price_change', 0)),
+                    'price_change_percent': (float(result.get('price_change', 0)) / float(result.get('last_price', 1)) * 100) if result.get('last_price') else 0,
+                    'volume': int(result.get('volume', 0)),
                     'industry': result.get('industry_group', 'Unknown'),
                     'relevance_score': self._calculate_relevance_score(query, result)
-                })
+                }
+                formatted_results.append(formatted_result)
             
             # Sort by relevance score - this is business logic, belongs in service
             formatted_results.sort(key=lambda x: x['relevance_score'], reverse=True)
@@ -118,10 +123,13 @@ class StockService:
             
         except Exception as e:
             print(f"Error searching symbols: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def get_ohlcv(self, symbol: str, days: int = 30, timeframe: str = "1d", 
-                   from_date: str = None, to_date: str = None, limit: int = None) -> List[Dict[str, Any]]:
+                   from_date: str = None, to_date: str = None, limit: int = None,
+                   before_date: str = None, after_date: str = None, cursor: str = None) -> List[Dict[str, Any]]:
         """Get OHLCV data with calculations"""
         
         try:
@@ -132,7 +140,10 @@ class StockService:
                 timeframe=timeframe,
                 from_date=from_date,
                 to_date=to_date,
-                limit=limit
+                limit=limit,
+                before_date=before_date,
+                after_date=after_date,
+                cursor=cursor
             )
             
             if not ohlcv_data:

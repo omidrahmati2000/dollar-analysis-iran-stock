@@ -34,9 +34,9 @@ const AdvancedSymbolSearch = ({
   const searchRef = useRef(null);
   const resultsRef = useRef(null);
 
-  // Load all symbols on mount
+  // Load popular symbols on mount instead of all symbols
   useEffect(() => {
-    loadAllSymbols();
+    loadPopularSymbols();
   }, []);
 
   // Handle click outside to close results
@@ -56,13 +56,13 @@ const AdvancedSymbolSearch = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const loadAllSymbols = async () => {
+  const loadPopularSymbols = async () => {
     try {
       setLoading(true);
       
       const [stocksResponse, currenciesResponse] = await Promise.all([
-        fetch('http://localhost:8000/api/v2/stocks?limit=100'),
-        fetch('http://localhost:8000/api/v2/currencies?limit=50')
+        fetch('http://localhost:8000/api/v2/stocks?limit=20'), // Load top 20 popular stocks
+        fetch('http://localhost:8000/api/v2/currencies?limit=15') // Load top 15 currencies/gold/coins
       ]);
 
       const stocks = await stocksResponse.json();
@@ -70,29 +70,64 @@ const AdvancedSymbolSearch = ({
 
       setAllSymbols({ stocks, currencies });
     } catch (error) {
-      console.error('Error loading symbols:', error);
+      console.error('Error loading popular symbols:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Search using backend APIs
+  const searchSymbols = async (searchQuery) => {
+    if (!searchQuery.trim()) {
+      setResults({ stocks: [], currencies: [] });
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      const [stocksResponse, currenciesResponse] = await Promise.all([
+        fetch(`http://localhost:8000/api/v2/stocks/search?q=${encodeURIComponent(searchQuery)}&limit=10`),
+        fetch(`http://localhost:8000/api/v2/currencies/search?q=${encodeURIComponent(searchQuery)}&limit=5`)
+      ]);
+
+      const rawStocks = await stocksResponse.json();
+      const rawCurrencies = await currenciesResponse.json();
+
+      // Map search API response to expected component format
+      const mappedStocks = Array.isArray(rawStocks) ? rawStocks.map(stock => ({
+        symbol: stock.symbol,
+        company_name: stock.company_name,
+        last_price: stock.last_price || 0,
+        price_change: stock.price_change || 0,
+        price_change_percent: stock.price_change_percent || 0,
+        volume: stock.volume || 0
+      })) : [];
+
+      const mappedCurrencies = Array.isArray(rawCurrencies) ? rawCurrencies.map(currency => ({
+        currency_code: currency.currency_code,
+        currency_name: currency.currency_name,
+        current_price: currency.price_irr || 0,
+        price_change: currency.change_24h || 0,
+        price_change_percent: currency.change_percent_24h || 0,
+        volume_24h: currency.volume_24h || 0
+      })) : [];
+
+      setResults({ 
+        stocks: mappedStocks, 
+        currencies: mappedCurrencies 
+      });
+    } catch (error) {
+      console.error('Error searching symbols:', error);
+      setResults({ stocks: [], currencies: [] });
     } finally {
       setLoading(false);
     }
   };
 
   const handleSearch = (searchQuery) => {
-    if (!searchQuery.trim()) {
-      setResults({ stocks: [], currencies: [] });
-      return;
-    }
-
-    const filterSymbols = (items) => 
-      items.filter(item => {
-        const symbol = item.symbol || item.currency_code || '';
-        const name = item.company_name || item.currency_name || '';
-        return symbol.includes(searchQuery) || name.includes(searchQuery);
-      });
-
-    setResults({
-      stocks: filterSymbols(allSymbols.stocks).slice(0, 10),
-      currencies: filterSymbols(allSymbols.currencies).slice(0, 5)
-    });
+    // Use backend search instead of client-side filtering
+    searchSymbols(searchQuery);
   };
 
   const handleInputChange = (e) => {
@@ -116,10 +151,13 @@ const AdvancedSymbolSearch = ({
     if (query) {
       handleSearch(query);
     } else {
-      // Show popular symbols when focused
+      // Show popular symbols when focused - with safety check
+      const popularStocks = Array.isArray(allSymbols.stocks) ? allSymbols.stocks.slice(0, 8) : [];
+      const popularCurrencies = Array.isArray(allSymbols.currencies) ? allSymbols.currencies.slice(0, 12) : [];
+      
       setResults({
-        stocks: allSymbols.stocks.slice(0, 10),
-        currencies: allSymbols.currencies.slice(0, 5)
+        stocks: popularStocks,
+        currencies: popularCurrencies
       });
     }
     setShowResults(true);

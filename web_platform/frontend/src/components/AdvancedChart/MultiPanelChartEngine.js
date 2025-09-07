@@ -18,6 +18,8 @@ class MultiPanelChartEngine {
             ...options
         };
         
+        this.visibleRangeSubscribed = false; // Flag to prevent multiple subscriptions
+        
         this.init();
     }
 
@@ -234,31 +236,96 @@ class MultiPanelChartEngine {
     }
 
     setupVisibleRangeHandler() {
+        console.log('🔧 setupVisibleRangeHandler called');
         const mainPanel = this.panels.get('main');
-        if (!mainPanel) return;
+        if (!mainPanel) {
+            console.log('❌ No main panel found for visible range handler');
+            return;
+        }
 
-        // Track visible range changes for auto-loading
+        // Prevent multiple subscriptions
+        if (this.visibleRangeSubscribed) {
+            console.log('🔄 Already subscribed to visible range changes');
+            return;
+        }
+
+        // Track visible range changes for smart auto-loading
         mainPanel.chart.timeScale().subscribeVisibleTimeRangeChange((visibleRange) => {
-            if (!visibleRange || !this.mainChartData || this.mainChartData.length === 0) return;
-
-            // Get the oldest and newest data points
-            const oldestDataTime = this.mainChartData[0].time;
-            const newestDataTime = this.mainChartData[this.mainChartData.length - 1].time;
+            console.log('🎯 subscribeVisibleTimeRangeChange called!', visibleRange);
             
-            // Check if user scrolled to the beginning (left edge) - load older data
-            if (visibleRange.from <= oldestDataTime) {
-                if (this.onLoadOlderData) {
-                    this.onLoadOlderData(oldestDataTime);
-                }
+            if (!visibleRange || !this.mainChartData || this.mainChartData.length === 0) {
+                console.log('⚠️ Skipping range change - no data or range');
+                return;
+            }
+
+            // 🧠 SMART INFINITE SCROLL: Calculate visible candles count
+            const { leftEdgeCandles, rightEdgeCandles } = this.calculateVisibleCandles(visibleRange);
+            
+            console.log(`🧠 Smart scroll check: ${leftEdgeCandles} candles on left edge, ${rightEdgeCandles} on right edge`);
+            
+            // 🎯 SMART CONDITION: Load older data if less than 10 candles visible on left edge
+            if (leftEdgeCandles < 10 && this.onLoadOlderData) {
+                console.log(`🔄 Smart trigger: Only ${leftEdgeCandles} candles on left edge, loading older data...`);
+                const oldestDataTime = this.mainChartData[0].time;
+                this.onLoadOlderData(oldestDataTime);
             }
             
-            // Check if user scrolled to the end (right edge) - load newer data
-            if (visibleRange.to >= newestDataTime) {
-                if (this.onLoadNewerData) {
-                    this.onLoadNewerData(newestDataTime);
-                }
+            // 🎯 SMART CONDITION: Load newer data if less than 10 candles visible on right edge  
+            if (rightEdgeCandles < 10 && this.onLoadNewerData) {
+                console.log(`🔄 Smart trigger: Only ${rightEdgeCandles} candles on right edge, loading newer data...`);
+                const newestDataTime = this.mainChartData[this.mainChartData.length - 1].time;
+                this.onLoadNewerData(newestDataTime);
             }
         });
+        
+        this.visibleRangeSubscribed = true;
+        console.log('✅ Visible range handler setup complete');
+    }
+
+    /**
+     * 🧠 Smart function to calculate how many candles are visible near edges
+     * This ensures smooth infinite scroll experience
+     */
+    calculateVisibleCandles(visibleRange) {
+        if (!visibleRange || !this.mainChartData || this.mainChartData.length === 0) {
+            console.log('🚫 calculateVisibleCandles: No data or range');
+            return { leftEdgeCandles: 0, rightEdgeCandles: 0 };
+        }
+
+        const rangeStart = visibleRange.from;
+        const rangeEnd = visibleRange.to;
+        const rangeWidth = rangeEnd - rangeStart;
+
+        console.log(`📊 Visible range: ${rangeStart} to ${rangeEnd} (width: ${rangeWidth})`);
+
+        // Create sorted array of timestamps
+        const timestamps = this.mainChartData.map(d => d.time).sort((a, b) => a - b);
+        
+        console.log(`📊 Data timestamps range: ${timestamps[0]} to ${timestamps[timestamps.length-1]}`);
+        
+        // Calculate buffer zones (10% of visible range on each side)
+        const leftBuffer = rangeStart - (rangeWidth * 0.1);
+        const rightBuffer = rangeEnd + (rangeWidth * 0.1);
+        
+        console.log(`📊 Buffers: left=${leftBuffer}, right=${rightBuffer}`);
+        
+        // Count candles in left edge buffer (before visible area)
+        let leftEdgeCandles = 0;
+        for (const timestamp of timestamps) {
+            if (timestamp >= leftBuffer && timestamp < rangeStart) {
+                leftEdgeCandles++;
+            }
+        }
+        
+        // Count candles in right edge buffer (after visible area)  
+        let rightEdgeCandles = 0;
+        for (const timestamp of timestamps) {
+            if (timestamp > rangeEnd && timestamp <= rightBuffer) {
+                rightEdgeCandles++;
+            }
+        }
+
+        return { leftEdgeCandles, rightEdgeCandles };
     }
 
     updatePanelSizes() {
@@ -380,6 +447,15 @@ class MultiPanelChartEngine {
         const seriesInfo = this.series.get(seriesId);
         if (seriesInfo && seriesInfo.series) {
             seriesInfo.series.setData(data);
+            
+            // 🔧 FIX: Update mainChartData for infinite scroll to work
+            if (seriesId === 'main') {
+                this.mainChartData = data;
+                console.log('🔧 setData: Updated mainChartData with', data.length, 'points for infinite scroll');
+                
+                // Re-setup visible range handler now that we have data
+                this.setupVisibleRangeHandler();
+            }
         }
     }
 
@@ -1288,6 +1364,10 @@ class MultiPanelChartEngine {
 
     // Get main chart data for indicator calculations
     getData() {
+        return this.mainChartData || [];
+    }
+    
+    getMainChartData() {
         return this.mainChartData || [];
     }
 

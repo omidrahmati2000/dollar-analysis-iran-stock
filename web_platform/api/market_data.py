@@ -255,17 +255,29 @@ async def get_price_data(
     end_date: Optional[datetime] = None,
     limit: int = Query(default=100, le=5000),
     data_type: int = Query(default=3, description="2=unadjusted, 3=adjusted"),
+    before_date: Optional[datetime] = Query(default=None, description="Get data before this date (for infinite scroll backward)"),
+    after_date: Optional[datetime] = Query(default=None, description="Get data after this date (for infinite scroll forward)"),
     db: DatabaseManager = Depends(get_db_manager)
 ):
     """Get historical price data for a symbol"""
     try:
         with db.get_connection() as conn:
             with conn.cursor() as cur:
-                # Default date range if not provided
-                if not end_date:
+                # Handle cursor-based pagination for infinite scroll
+                if before_date:
+                    # Going backward in time (older data)
+                    end_date = before_date
+                    start_date = None  # Will be limited by query limit
+                elif after_date:
+                    # Going forward in time (newer data)
+                    start_date = after_date
                     end_date = datetime.now()
-                if not start_date:
-                    start_date = end_date - timedelta(days=365)
+                else:
+                    # Default date range if not provided
+                    if not end_date:
+                        end_date = datetime.now()
+                    if not start_date:
+                        start_date = end_date - timedelta(days=365)
                 
                 # Check if it's a stock or currency
                 cur.execute("SELECT stock_id FROM stock_symbols WHERE symbol = %s", (symbol,))
@@ -275,16 +287,38 @@ async def get_price_data(
                     # It's a stock - get candlestick data
                     stock_id = stock_result[0]
                     
-                    query = """
-                        SELECT date_time, open_price, high_price, low_price, close_price, volume
-                        FROM candlestick_data
-                        WHERE stock_id = %s AND data_type = %s
-                        AND date_time BETWEEN %s AND %s
-                        ORDER BY date_time DESC
-                        LIMIT %s
-                    """
-                    
-                    cur.execute(query, (stock_id, data_type, start_date, end_date, limit))
+                    # Build dynamic query based on pagination direction
+                    if before_date:
+                        # Going backward (getting older data)
+                        query = """
+                            SELECT date_time, open_price, high_price, low_price, close_price, volume
+                            FROM candlestick_data
+                            WHERE stock_id = %s AND data_type = %s AND date_time < %s
+                            ORDER BY date_time DESC
+                            LIMIT %s
+                        """
+                        cur.execute(query, (stock_id, data_type, before_date, limit))
+                    elif after_date:
+                        # Going forward (getting newer data)
+                        query = """
+                            SELECT date_time, open_price, high_price, low_price, close_price, volume
+                            FROM candlestick_data
+                            WHERE stock_id = %s AND data_type = %s AND date_time > %s
+                            ORDER BY date_time ASC
+                            LIMIT %s
+                        """
+                        cur.execute(query, (stock_id, data_type, after_date, limit))
+                    else:
+                        # Default range query
+                        query = """
+                            SELECT date_time, open_price, high_price, low_price, close_price, volume
+                            FROM candlestick_data
+                            WHERE stock_id = %s AND data_type = %s
+                            AND date_time BETWEEN %s AND %s
+                            ORDER BY date_time DESC
+                            LIMIT %s
+                        """
+                        cur.execute(query, (stock_id, data_type, start_date, end_date, limit))
                     
                 else:
                     # Check if it's a currency
@@ -294,17 +328,38 @@ async def get_price_data(
                     if currency_result:
                         currency_id = currency_result[0]
                         
-                        query = """
-                            SELECT date_time, price as open_price, price as high_price, 
-                                   price as low_price, price as close_price, 0 as volume
-                            FROM currency_history
-                            WHERE currency_id = %s
-                            AND date_time BETWEEN %s AND %s
-                            ORDER BY date_time DESC
-                            LIMIT %s
-                        """
-                        
-                        cur.execute(query, (currency_id, start_date, end_date, limit))
+                        # Build dynamic query for currency based on pagination direction
+                        if before_date:
+                            query = """
+                                SELECT date_time, price as open_price, price as high_price, 
+                                       price as low_price, price as close_price, 0 as volume
+                                FROM currency_history
+                                WHERE currency_id = %s AND date_time < %s
+                                ORDER BY date_time DESC
+                                LIMIT %s
+                            """
+                            cur.execute(query, (currency_id, before_date, limit))
+                        elif after_date:
+                            query = """
+                                SELECT date_time, price as open_price, price as high_price, 
+                                       price as low_price, price as close_price, 0 as volume
+                                FROM currency_history
+                                WHERE currency_id = %s AND date_time > %s
+                                ORDER BY date_time ASC
+                                LIMIT %s
+                            """
+                            cur.execute(query, (currency_id, after_date, limit))
+                        else:
+                            query = """
+                                SELECT date_time, price as open_price, price as high_price, 
+                                       price as low_price, price as close_price, 0 as volume
+                                FROM currency_history
+                                WHERE currency_id = %s
+                                AND date_time BETWEEN %s AND %s
+                                ORDER BY date_time DESC
+                                LIMIT %s
+                            """
+                            cur.execute(query, (currency_id, start_date, end_date, limit))
                     else:
                         raise HTTPException(status_code=404, detail=f"Symbol '{symbol}' not found")
                 
@@ -320,15 +375,53 @@ async def get_price_data(
                         symbol=symbol
                     ))
                 
-                # Reverse to get chronological order
-                ohlcv_data.reverse()
+                # Handle ordering based on pagination direction
+                if after_date:
+                    # Keep ASC order for forward pagination, then reverse for UI
+                    ohlcv_data.reverse()
+                elif not before_date:
+                    # Default: reverse to get chronological order
+                    ohlcv_data.reverse()
+                # For before_date (backward pagination), keep DESC order
                 
-                price_data = PriceData(
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    data=ohlcv_data,
-                    count=len(ohlcv_data)
-                )
+                # Calculate pagination metadata
+                has_more_data = len(ohlcv_data) == limit
+                next_cursor = None
+                prev_cursor = None
+                
+                if ohlcv_data:
+                    if before_date or not after_date:
+                        # For backward scroll, next_cursor is the oldest timestamp
+                        next_cursor = ohlcv_data[-1].timestamp.isoformat() if has_more_data else None
+                        # prev_cursor is the newest timestamp
+                        prev_cursor = ohlcv_data[0].timestamp.isoformat()
+                    else:
+                        # For forward scroll, next_cursor is the newest timestamp
+                        next_cursor = ohlcv_data[-1].timestamp.isoformat() if has_more_data else None
+                        # prev_cursor is the oldest timestamp
+                        prev_cursor = ohlcv_data[0].timestamp.isoformat()
+                
+                price_data = {
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "data": [
+                        {
+                            "timestamp": item.timestamp,
+                            "open": item.open,
+                            "high": item.high,
+                            "low": item.low,
+                            "close": item.close,
+                            "volume": item.volume
+                        } for item in ohlcv_data
+                    ],
+                    "count": len(ohlcv_data),
+                    "pagination": {
+                        "has_more": has_more_data,
+                        "next_cursor": next_cursor,
+                        "prev_cursor": prev_cursor,
+                        "limit": limit
+                    }
+                }
                 
                 return APIResponse(data=price_data)
                 

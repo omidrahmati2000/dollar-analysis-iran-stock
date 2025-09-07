@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box,
   Paper,
@@ -89,6 +89,14 @@ const AdvancedCharts = () => {
   const [drawingPanelOpen, setDrawingPanelOpen] = useState(false);
   const [hoverData, setHoverData] = useState(null);
   const [candleTooltip, setCandleTooltip] = useState({ visible: false, x: 0, y: 0, data: null });
+  const [infiniteScrollState, setInfiniteScrollState] = useState({
+    isLoadingOlder: false,
+    isLoadingNewer: false,
+    hasMoreOlder: true,
+    hasMoreNewer: true,
+    oldestCursor: null,
+    newestCursor: null
+  });
 
   // Iranian stocks and currencies - will be populated from backend
   const symbols = realSymbols.length > 0 ? realSymbols : [
@@ -218,11 +226,22 @@ const AdvancedCharts = () => {
     // Load quotes for current symbol
     if (selectedSymbol) {
       loadSymbolQuote(selectedSymbol);
+      
+      // Update drawing tools with new symbol
+      if (drawingToolsRef.current) {
+        drawingToolsRef.current.setSymbol(selectedSymbol);
+      }
     }
   }, [selectedSymbol]);
 
   useEffect(() => {
     if (engineRef.current && dataServiceRef.current) {
+      // Update DrawingTools context
+      if (drawingToolsRef.current) {
+        drawingToolsRef.current.setTimeframe(selectedTimeframe);
+        drawingToolsRef.current.setDataType(adjustedData ? 'adjusted' : 'unadjusted');
+      }
+      
       // Debounce chart data loading
       const timeoutId = setTimeout(() => {
         loadChartData();
@@ -350,9 +369,28 @@ const AdvancedCharts = () => {
       // Initialize drawing tools lazily
       setTimeout(() => {
         drawingToolsRef.current = new DrawingTools(engineRef.current);
+        
+        // Make DrawingTools available globally for testing
+        window.drawingToolsInstance = drawingToolsRef.current;
+        
+        // Set initial symbol
+        if (drawingToolsRef.current && selectedSymbol) {
+          drawingToolsRef.current.setSymbol(selectedSymbol);
+        }
         setupChartHoverHandlers();
         console.log('✅ Drawing Tools initialized successfully');
       }, 500);
+      
+      // Setup infinite scroll callbacks
+      if (engineRef.current) {
+        console.log('🔧 Setting up infinite scroll callbacks');
+        engineRef.current.onLoadOlderData = handleLoadOlderData;
+        engineRef.current.onLoadNewerData = handleLoadNewerData;
+        console.log('✅ Infinite scroll callbacks set successfully');
+        console.log('🔗 onLoadOlderData callback:', typeof handleLoadOlderData);
+      } else {
+        console.error('❌ engineRef.current is null when trying to set callbacks');
+      }
       
       // Load initial data with delay for smoother UI
       setTimeout(() => {
@@ -377,6 +415,16 @@ const AdvancedCharts = () => {
     
     // Prevent multiple concurrent loads
     if (isLoading) return;
+    
+    // Reset infinite scroll state when loading new chart data
+    setInfiniteScrollState({
+      isLoadingOlder: false,
+      isLoadingNewer: false,
+      hasMoreOlder: true,
+      hasMoreNewer: true,
+      oldestCursor: null,
+      newestCursor: null
+    });
     
     benchmark.start('data-loading');
     setIsLoading(true);
@@ -432,6 +480,13 @@ const AdvancedCharts = () => {
         // Update the main chart data using correct method
         engineRef.current.updateMainChartData(data);
         
+        // Re-setup infinite scroll callbacks after data update
+        if (engineRef.current) {
+          console.log('🔧 Re-setting infinite scroll callbacks after data load');
+          engineRef.current.onLoadOlderData = handleLoadOlderData;
+          engineRef.current.onLoadNewerData = handleLoadNewerData;
+        }
+        
         // Save last data point for Live Quote display
         if (data.length > 0) {
           const lastCandle = data[data.length - 1];
@@ -455,6 +510,164 @@ const AdvancedCharts = () => {
       setIsLoading(false);
     }
   };
+
+  // Handle loading older data (scrolling left/backward)
+  const handleLoadOlderData = useCallback(async (currentOldestTime) => {
+    console.log('🟦 handleLoadOlderData called with time:', currentOldestTime);
+    
+    if (!dataServiceRef.current) {
+      console.log('❌ dataServiceRef.current is null');
+      return;
+    }
+    
+    // Check loading state and start loading if possible
+    let shouldProceed = false;
+    setInfiniteScrollState(prev => {
+      console.log('🟦 Current infinite scroll state:', prev);
+      
+      if (prev.isLoadingOlder) {
+        console.log('⚠️ Already loading older data, skipping');
+        return prev;
+      }
+      
+      if (!prev.hasMoreOlder) {
+        console.log('⚠️ No more older data available');
+        return prev;
+      }
+      
+      // Start loading
+      console.log('🔄 Starting to load older data...');
+      shouldProceed = true;
+      return { ...prev, isLoadingOlder: true };
+    });
+
+    if (!shouldProceed) return;
+
+    try {
+      // Convert timestamp to ISO string for API
+      const beforeDate = new Date(currentOldestTime * 1000).toISOString();
+      
+      const result = await dataServiceRef.current.getHistoricalDataPaginated(
+        selectedSymbol,
+        selectedTimeframe,
+        {
+          beforeDate: beforeDate,
+          limit: 200,
+          useCache: true
+        }
+      );
+
+      if (result && result.data && result.data.length > 0) {
+        // Prepend older data to existing chart data
+        const existingData = engineRef.current.getMainChartData() || [];
+        const newData = [...result.data, ...existingData];
+        
+        // Update chart with merged data
+        engineRef.current.updateMainChartData(newData);
+        
+        // Update infinite scroll state
+        setInfiniteScrollState(prev => ({
+          ...prev,
+          isLoadingOlder: false,
+          hasMoreOlder: result.pagination?.has_more || false,
+          oldestCursor: result.pagination?.next_cursor || null
+        }));
+        
+        console.log('✅ Loaded', result.data.length, 'older data points');
+      } else {
+        setInfiniteScrollState(prev => ({
+          ...prev,
+          isLoadingOlder: false,
+          hasMoreOlder: false
+        }));
+      }
+    } catch (error) {
+      console.error('❌ Error loading older data:', error);
+      setInfiniteScrollState(prev => ({
+        ...prev,
+        isLoadingOlder: false
+      }));
+    }
+  }, [selectedSymbol, selectedTimeframe]);
+
+  // Handle loading newer data (scrolling right/forward)
+  const handleLoadNewerData = useCallback(async (currentNewestTime) => {
+    console.log('🟩 handleLoadNewerData called with time:', currentNewestTime);
+    
+    if (!dataServiceRef.current) {
+      console.log('❌ dataServiceRef.current is null');
+      return;
+    }
+    
+    // Check loading state and start loading if possible
+    let shouldProceed = false;
+    setInfiniteScrollState(prev => {
+      console.log('🟩 Current infinite scroll state:', prev);
+      
+      if (prev.isLoadingNewer) {
+        console.log('⚠️ Already loading newer data, skipping');
+        return prev;
+      }
+      
+      if (!prev.hasMoreNewer) {
+        console.log('⚠️ No more newer data available');
+        return prev;
+      }
+      
+      // Start loading
+      console.log('🔄 Starting to load newer data...');
+      shouldProceed = true;
+      return { ...prev, isLoadingNewer: true };
+    });
+
+    if (!shouldProceed) return;
+
+    try {
+      // Convert timestamp to ISO string for API
+      const afterDate = new Date(currentNewestTime * 1000).toISOString();
+      
+      const result = await dataServiceRef.current.getHistoricalDataPaginated(
+        selectedSymbol,
+        selectedTimeframe,
+        {
+          afterDate: afterDate,
+          limit: 200,
+          useCache: true
+        }
+      );
+
+      if (result && result.data && result.data.length > 0) {
+        // Append newer data to existing chart data
+        const existingData = engineRef.current.getMainChartData() || [];
+        const newData = [...existingData, ...result.data];
+        
+        // Update chart with merged data
+        engineRef.current.updateMainChartData(newData);
+        
+        // Update infinite scroll state
+        setInfiniteScrollState(prev => ({
+          ...prev,
+          isLoadingNewer: false,
+          hasMoreNewer: result.pagination?.has_more || false,
+          newestCursor: result.pagination?.next_cursor || null
+        }));
+        
+        console.log('✅ Loaded', result.data.length, 'newer data points');
+      } else {
+        setInfiniteScrollState(prev => ({
+          ...prev,
+          isLoadingNewer: false,
+          hasMoreNewer: false
+        }));
+      }
+    } catch (error) {
+      console.error('❌ Error loading newer data:', error);
+      setInfiniteScrollState(prev => ({
+        ...prev,
+        isLoadingNewer: false
+      }));
+    }
+  }, [selectedSymbol, selectedTimeframe]);
 
   const addIndicator = async (indicatorConfig) => {
     if (!dataServiceRef.current || !engineRef.current) {
@@ -547,14 +760,14 @@ const AdvancedCharts = () => {
 
   const handleClearAllDrawings = () => {
     if (drawingToolsRef.current) {
-      drawingToolsRef.current.clearAllDrawings();
+      drawingToolsRef.current.clearAll();
       console.log('🗑️ Cleared all drawings');
     }
   };
 
   const handleDeleteSelectedDrawing = () => {
     if (drawingToolsRef.current) {
-      drawingToolsRef.current.deleteSelectedDrawing();
+      drawingToolsRef.current.deleteSelected();
       console.log('🗑️ Deleted selected drawing');
     }
   };
@@ -1036,6 +1249,43 @@ const AdvancedCharts = () => {
             <Typography>Loading chart data...</Typography>
           </Box>
         )}
+        
+        {/* Infinite scroll loading indicators */}
+        {infiniteScrollState.isLoadingOlder && (
+          <Box 
+            sx={{ 
+              position: 'absolute', 
+              top: 10, 
+              left: 10,
+              zIndex: 1000,
+              bgcolor: 'rgba(0,0,0,0.7)',
+              px: 1.5,
+              py: 0.5,
+              borderRadius: 1,
+              color: 'white'
+            }}
+          >
+            <Typography variant="caption">Loading older data...</Typography>
+          </Box>
+        )}
+        
+        {infiniteScrollState.isLoadingNewer && (
+          <Box 
+            sx={{ 
+              position: 'absolute', 
+              top: 10, 
+              right: 10,
+              zIndex: 1000,
+              bgcolor: 'rgba(0,0,0,0.7)',
+              px: 1.5,
+              py: 0.5,
+              borderRadius: 1,
+              color: 'white'
+            }}
+          >
+            <Typography variant="caption">Loading newer data...</Typography>
+          </Box>
+        )}
       </Box>
       
       {/* Enhanced Drawing Tools Panel - Floating Overlay */}
@@ -1206,7 +1456,7 @@ const AdvancedCharts = () => {
                 Controls
               </Typography>
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                <Button size="small" variant="outlined" onClick={() => drawingToolsRef.current?.clearAllDrawings()}>
+                <Button size="small" variant="outlined" onClick={() => drawingToolsRef.current?.clearAll()}>
                   Clear All
                 </Button>
                 <Button size="small" variant="outlined" disabled>

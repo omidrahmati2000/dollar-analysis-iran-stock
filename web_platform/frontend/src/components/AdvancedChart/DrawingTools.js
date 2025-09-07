@@ -12,6 +12,11 @@ class DrawingTools {
         this.snapToTime = true;
         this.isDragging = false;
         this.dragStartPoint = null;
+        this.frozenTools = new Set(); // Tools that should not be redrawn
+        
+        // اضافه کردن tracking برای context کامل
+        this.currentTimeframe = '1D';
+        this.currentDataType = 'unadjusted'; // 'adjusted' یا 'unadjusted'
         
         // Advanced Fibonacci system
         this.fibonacciSettings = {
@@ -102,11 +107,14 @@ class DrawingTools {
     }
 
     setupEventListeners() {
-        // Mouse events for drawing
-        document.addEventListener('mousedown', this.handleMouseDown.bind(this));
-        document.addEventListener('mousemove', this.handleMouseMove.bind(this));
-        document.addEventListener('mouseup', this.handleMouseUp.bind(this));
-        document.addEventListener('keydown', this.handleKeyDown.bind(this));
+        // Mouse events only for chart container to prevent interference
+        if (this.chartEngine.container) {
+            this.chartEngine.container.addEventListener('mousedown', this.handleMouseDown.bind(this));
+            this.chartEngine.container.addEventListener('mousemove', this.handleMouseMove.bind(this));
+            this.chartEngine.container.addEventListener('mouseup', this.handleMouseUp.bind(this));
+            this.chartEngine.container.addEventListener('mouseleave', this.handleMouseUp.bind(this)); // End drawing if mouse leaves
+        }
+        document.addEventListener('keydown', this.handleKeyDown.bind(this)); // Keep global for keyboard shortcuts
     }
 
     setupChartEventListeners() {
@@ -117,9 +125,9 @@ class DrawingTools {
             try {
                 const timeScale = mainPanel.chart.timeScale();
                 if (timeScale && typeof timeScale.subscribeVisibleTimeRangeChange === 'function') {
+                    // Use debounced redraw to avoid too many redraws during rapid changes
                     timeScale.subscribeVisibleTimeRangeChange(() => {
-                        console.log('Time scale changed - redrawing elements');
-                        this.redrawAllElements();
+                        this.debounceRedraw('timeScale');
                     });
                 }
             } catch (error) {
@@ -131,8 +139,7 @@ class DrawingTools {
                 const priceScale = mainPanel.chart.priceScale('right');
                 if (priceScale && typeof priceScale.subscribeVisibleRangeChange === 'function') {
                     priceScale.subscribeVisibleRangeChange(() => {
-                        console.log('Price scale changed - redrawing elements');
-                        this.redrawAllElements();
+                        this.debounceRedraw('priceScale');
                     });
                 }
             } catch (error) {
@@ -142,8 +149,7 @@ class DrawingTools {
             // Also listen to chart resize
             if (typeof ResizeObserver !== 'undefined') {
                 const resizeObserver = new ResizeObserver(() => {
-                    console.log('Chart resized - redrawing elements');
-                    setTimeout(() => this.redrawAllElements(), 100);
+                    this.debounceRedraw('resize');
                 });
                 resizeObserver.observe(this.chartEngine.container);
                 this.resizeObserver = resizeObserver;
@@ -151,11 +157,73 @@ class DrawingTools {
         }
     }
 
+    debounceRedraw(reason) {
+        // Clear existing timeout to avoid multiple rapid redraws
+        if (this.redrawTimeout) {
+            clearTimeout(this.redrawTimeout);
+        }
+        
+        // Invalidate cache when chart changes
+        this.cachedPriceRange = null;
+        this.cacheTimestamp = 0;
+        
+        // Use longer delay for better performance
+        this.redrawTimeout = setTimeout(() => {
+            requestAnimationFrame(() => {
+                // Only log major redraws to reduce console spam
+                if (reason !== 'timeScale' && reason !== 'priceScale') {
+                    console.log(`Chart ${reason} changed - redrawing ${this.tools.size} elements`);
+                }
+                this.redrawAllElements();
+                this.redrawTimeout = null;
+            });
+        }, reason === 'timeScale' || reason === 'priceScale' ? 200 : 50); // Much longer delay for scale changes
+    }
+
     redrawAllElements() {
         // Redraw all elements to maintain their position relative to price/time
-        this.tools.forEach(drawing => {
-            this.renderDrawing(drawing);
-        });
+        if (this.isRedrawing) return; // Prevent recursive redraws
+        
+        this.isRedrawing = true;
+        try {
+            // Update SVG overlay size first
+            const svg = this.chartEngine.container.querySelector('.drawing-overlay');
+            if (svg) {
+                const containerRect = this.chartEngine.container.getBoundingClientRect();
+                svg.setAttribute('viewBox', `0 0 ${containerRect.width} ${containerRect.height}`);
+            }
+            
+            // Get visible range for optimization
+            const mainPanel = this.chartEngine.panels.get('main');
+            let visibleTimeRange = null;
+            let visiblePriceRange = null;
+            
+            if (mainPanel && mainPanel.chart) {
+                const timeScale = mainPanel.chart.timeScale();
+                const priceScale = mainPanel.chart.priceScale('right');
+                
+                if (timeScale && typeof timeScale.getVisibleRange === 'function') {
+                    visibleTimeRange = timeScale.getVisibleRange();
+                }
+                if (priceScale && typeof priceScale.getVisibleRange === 'function') {
+                    visiblePriceRange = priceScale.getVisibleRange();
+                }
+            }
+            
+            // Redraw all drawing elements, but skip frozen ones
+            this.tools.forEach(drawing => {
+                // Skip frozen fibonacci tools to prevent movement during pan/zoom
+                if (this.frozenTools.has(drawing.id)) {
+                    return;
+                }
+                
+                this.renderDrawing(drawing);
+            });
+        } catch (error) {
+            console.error('Error during redraw:', error);
+        } finally {
+            this.isRedrawing = false;
+        }
     }
 
     setActiveTool(toolType) {
@@ -221,6 +289,12 @@ class DrawingTools {
             return;
         }
 
+        // Prevent chart interaction when drawing tools are active
+        if (this.activeTool && this.activeTool !== 'none') {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+
         const point = this.getChartPoint(event);
         
         // If no tool is active or select tool, check for element selection
@@ -260,6 +334,12 @@ class DrawingTools {
                 break;
             case 'ray':
                 this.startRay(point);
+                break;
+            case 'line':
+                this.startLine(point);
+                break;
+            case 'segment':
+                this.startSegment(point);
                 break;
             case 'parallel':
                 this.startParallelChannel(point);
@@ -306,6 +386,12 @@ class DrawingTools {
     }
 
     handleMouseMove(event) {
+        // Prevent chart panning during drawing/dragging
+        if ((this.isDrawing && this.currentDrawing) || (this.isDragging && this.selectedDrawing)) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        
         // Handle dragging selected elements
         if (this.isDragging && this.selectedDrawing && this.dragStartPoint) {
             const point = this.getChartPoint(event);
@@ -372,8 +458,18 @@ class DrawingTools {
 
     getChartPoint(event) {
         const rect = this.chartEngine.container.getBoundingClientRect();
-        const x = event.clientX - rect.left;
-        const y = event.clientY - rect.top;
+        const x = Math.round(event.clientX - rect.left);
+        const y = Math.round(event.clientY - rect.top);
+        
+        // Validate coordinates are within chart bounds
+        if (x < 0 || x > rect.width || y < 0 || y > rect.height) {
+            return {
+                x: Math.max(0, Math.min(rect.width, x)),
+                y: Math.max(0, Math.min(rect.height, y)),
+                time: Date.now() / 1000,
+                price: 50000
+            };
+        }
         
         // Get main panel for coordinate conversion
         const mainPanel = this.chartEngine.panels.get('main');
@@ -393,35 +489,113 @@ class DrawingTools {
         let time, price;
         
         try {
-            // Handle time coordinate conversion
+            // Handle time coordinate conversion - try multiple methods
+            time = null;
+            
+            // Method 1: Direct coordinateToTime
             if (typeof timeScale.coordinateToTime === 'function') {
-                time = timeScale.coordinateToTime(x);
-            } else if (typeof timeScale.coordinateToLogical === 'function') {
-                time = timeScale.coordinateToLogical(x);
-            } else {
-                time = Date.now() / 1000; // Current timestamp fallback
+                try {
+                    const timeResult = timeScale.coordinateToTime(x);
+                    if (timeResult && !isNaN(timeResult) && timeResult > 0) {
+                        time = timeResult;
+                    }
+                } catch (e) {
+                    // Method failed, try next one
+                }
             }
             
-            // Handle price coordinate conversion with simple estimation
+            // Method 2: Logical coordinate conversion if method 1 failed
+            if (!time && typeof timeScale.coordinateToLogical === 'function' && typeof timeScale.logicalToTime === 'function') {
+                try {
+                    const logical = timeScale.coordinateToLogical(x);
+                    if (logical !== null && logical !== undefined && !isNaN(logical)) {
+                        const timeResult = timeScale.logicalToTime(logical);
+                        if (timeResult && !isNaN(timeResult) && timeResult > 0) {
+                            time = timeResult;
+                        }
+                    }
+                } catch (e) {
+                    // Method failed, try next one
+                }
+            }
+            
+            // Method 3: Fallback using visible range
+            if (!time) {
+                const visibleRange = timeScale.getVisibleRange();
+                if (visibleRange && visibleRange.from && visibleRange.to) {
+                    const rect = this.chartEngine.container.getBoundingClientRect();
+                    const timeRange = visibleRange.to - visibleRange.from;
+                    const xRatio = x / rect.width;
+                    const calculatedTime = visibleRange.from + (xRatio * timeRange);
+                    if (calculatedTime && !isNaN(calculatedTime) && calculatedTime > 0) {
+                        time = calculatedTime;
+                    }
+                }
+            }
+            
+            // Final fallback - don't use Date.now(), use a default based on chart data
+            if (!time) {
+                console.warn('All time conversion methods failed, using fallback time');
+                time = 1640995200; // A reasonable default timestamp (Jan 1, 2022)
+            }
+            
+            // Handle price coordinate conversion  
+            price = null;
+            
+            // Method 1: Direct coordinateToPrice
             if (typeof priceScale.coordinateToPrice === 'function') {
-                price = priceScale.coordinateToPrice(y);
-            } else {
-                // Simple linear estimation based on chart height
+                try {
+                    const priceResult = priceScale.coordinateToPrice(y);
+                    if (priceResult && !isNaN(priceResult) && priceResult > 0) {
+                        price = priceResult;
+                    }
+                } catch (e) {
+                    // Method failed, try fallback
+                }
+            }
+            
+            // Method 2: Fallback using visible price range
+            if (!price) {
+                try {
+                    const visiblePriceRange = priceScale.getVisibleRange();
+                    if (visiblePriceRange && visiblePriceRange.from && visiblePriceRange.to) {
+                        const rect = this.chartEngine.container.getBoundingClientRect();
+                        const priceRange = visiblePriceRange.to - visiblePriceRange.from;
+                        // Fix Y coordinate mapping - top should be high price, bottom should be low price
+                        const yRatio = (y / rect.height); // Direct ratio without inversion
+                        const calculatedPrice = visiblePriceRange.to - (yRatio * priceRange); // High price at top
+                        
+                        if (calculatedPrice && !isNaN(calculatedPrice) && calculatedPrice > 0) {
+                            price = calculatedPrice;
+                        }
+                    }
+                } catch (e) {
+                    // Fallback failed
+                }
+            }
+            
+            // Method 3: Final fallback with reasonable Iranian stock prices
+            if (!price) {
+                const rect = this.chartEngine.container.getBoundingClientRect();
                 const normalizedY = y / rect.height;
-                // Estimate price range for Iranian stocks (1000-100000 Rials)
-                const minPrice = 1000;
-                const maxPrice = 100000;
+                // Estimate price range for Iranian stocks
+                const minPrice = 10000;  // 10K Rials
+                const maxPrice = 200000; // 200K Rials
                 price = maxPrice - (normalizedY * (maxPrice - minPrice));
             }
             
             // Ensure valid values
-            time = time || Date.now() / 1000;
-            price = price || 50000;
+            if (!time || isNaN(time) || time <= 0) {
+                time = 1640995200; // Default timestamp
+            }
+            if (!price || isNaN(price) || price <= 0) {
+                price = 50000; // Default price
+            }
             
         } catch (error) {
             console.warn('Chart coordinate conversion error:', error);
-            time = Date.now() / 1000;
-            price = 50000;
+            time = 1640995200; // Default timestamp
+            price = 50000;     // Default price
         }
         
         const result = {
@@ -431,7 +605,6 @@ class DrawingTools {
             price: this.snapToPrice ? this.snapPriceToLevel(price) : price
         };
         
-        console.log('getChartPoint result:', result);
         return result;
     }
 
@@ -462,6 +635,12 @@ class DrawingTools {
                 return 100;
             }
             
+            // Ensure time is valid
+            if (!time || isNaN(time)) {
+                console.warn('Invalid time provided:', time);
+                return 100;
+            }
+            
             // Try TradingView timeToCoordinate method
             if (typeof timeScale.timeToCoordinate === 'function') {
                 const coord = timeScale.timeToCoordinate(time);
@@ -470,10 +649,10 @@ class DrawingTools {
                 }
             }
             
-            // Try logical coordinate conversion
-            if (typeof timeScale.logicalToCoordinate === 'function' && typeof timeScale.timeToLogical === 'function') {
+            // Try logical coordinate conversion for better accuracy
+            if (typeof timeScale.timeToLogical === 'function' && typeof timeScale.logicalToCoordinate === 'function') {
                 const logical = timeScale.timeToLogical(time);
-                if (logical !== null && logical !== undefined) {
+                if (logical !== null && logical !== undefined && !isNaN(logical)) {
                     const coord = timeScale.logicalToCoordinate(logical);
                     if (this.isValidCoordinate(coord)) {
                         return coord;
@@ -481,8 +660,25 @@ class DrawingTools {
                 }
             }
             
-            // Fallback estimation
-            console.warn('Using fallback time coordinate for time:', time);
+            // Enhanced fallback using visible time range
+            try {
+                const visibleRange = timeScale.getVisibleRange();
+                if (visibleRange && visibleRange.from && visibleRange.to) {
+                    const containerRect = this.chartEngine.container.getBoundingClientRect();
+                    const timeRange = visibleRange.to - visibleRange.from;
+                    const timeOffset = time - visibleRange.from;
+                    const coord = (timeOffset / timeRange) * containerRect.width;
+                    
+                    if (this.isValidCoordinate(coord)) {
+                        return coord;
+                    }
+                }
+            } catch (fallbackError) {
+                console.warn('Fallback time coordinate calculation failed:', fallbackError);
+            }
+            
+            // Last resort fallback
+            console.warn('Using default time coordinate for time:', time);
             return 100;
             
         } catch (error) {
@@ -491,78 +687,58 @@ class DrawingTools {
         }
     }
 
+    // Cache for price range to avoid repeated calculations
+    cachedPriceRange = null;
+    cacheTimestamp = 0;
+    cacheValidFor = 1000; // Cache valid for 1 second
+    lastChartState = null; // Track chart state changes
+
     safePriceToCoordinate(priceScale, price, containerHeight = 400) {
+        if (price === null || price === undefined || isNaN(price)) {
+            return containerHeight / 2;
+        }
+        
         try {
-            if (!priceScale) {
-                console.warn('No priceScale provided to safePriceToCoordinate');
-                return containerHeight / 2;
-            }
-            
-            // Try TradingView priceToCoordinate method
-            if (typeof priceScale.priceToCoordinate === 'function') {
+            // First try the official lightweight-charts API method
+            if (priceScale && typeof priceScale.priceToCoordinate === 'function') {
                 const coord = priceScale.priceToCoordinate(price);
                 if (this.isValidCoordinate(coord)) {
                     return coord;
                 }
             }
             
-            // Try to get visible range for better estimation
-            let visibleRange = null;
-            try {
-                if (typeof priceScale.getVisibleRange === 'function') {
-                    visibleRange = priceScale.getVisibleRange();
-                }
-            } catch (e) {
-                console.warn('Could not get visible range:', e);
-            }
-            
-            if (visibleRange && visibleRange.from !== undefined && visibleRange.to !== undefined) {
-                // Use actual visible range for accurate positioning
-                const normalizedPrice = (price - visibleRange.from) / (visibleRange.to - visibleRange.from);
-                const coord = containerHeight - (normalizedPrice * containerHeight);
-                if (this.isValidCoordinate(coord)) {
-                    return coord;
-                }
-            }
-            
-            // Enhanced fallback with better Iranian stock price estimation
-            console.warn('Using enhanced fallback price coordinate for price:', price);
-            
-            // Try to get some price context from existing data
-            let estimatedMinPrice = 1000;
-            let estimatedMaxPrice = 100000;
-            
-            // If we have chart data, use it for better estimation
-            try {
-                const mainPanel = this.chartEngine.panels.get('main');
-                if (mainPanel && mainPanel.chart && mainPanel.chart.getVisibleRange) {
-                    const dataRange = mainPanel.chart.getVisibleRange();
-                    if (dataRange) {
-                        estimatedMinPrice = Math.min(estimatedMinPrice, dataRange.from || estimatedMinPrice);
-                        estimatedMaxPrice = Math.max(estimatedMaxPrice, dataRange.to || estimatedMaxPrice);
+            // Fallback: Get price range from visible range and calculate proportionally
+            if (priceScale && typeof priceScale.getVisibleRange === 'function') {
+                const visibleRange = priceScale.getVisibleRange();
+                if (visibleRange && visibleRange.from !== undefined && visibleRange.to !== undefined) {
+                    // Fix Y coordinate mapping to match getChartPoint logic
+                    const priceRatio = (price - visibleRange.from) / (visibleRange.to - visibleRange.from);
+                    const coord = containerHeight * (1 - priceRatio); // High price at top (y=0), low price at bottom
+                    if (this.isValidCoordinate(coord)) {
+                        return coord;
                     }
                 }
-            } catch (e) {
-                // Continue with defaults
             }
             
-            // Apply some padding to the range
-            const rangePadding = (estimatedMaxPrice - estimatedMinPrice) * 0.1;
-            estimatedMinPrice -= rangePadding;
-            estimatedMaxPrice += rangePadding;
-            
-            const normalizedPrice = Math.max(0, Math.min(1, (price - estimatedMinPrice) / (estimatedMaxPrice - estimatedMinPrice)));
-            return containerHeight - (normalizedPrice * containerHeight);
-            
         } catch (error) {
-            console.warn('Price coordinate conversion failed:', error, 'for price:', price);
-            return containerHeight / 2;
+            console.warn('Price coordinate conversion failed:', error);
         }
+        
+        // Final fallback with reasonable Iranian stock price estimation
+        const estimatedMin = 1000;
+        const estimatedMax = 500000;
+        const normalizedPrice = Math.max(0, Math.min(1, (price - estimatedMin) / (estimatedMax - estimatedMin)));
+        return containerHeight * (1 - normalizedPrice);
     }
 
-    // Enhanced coordinate validation
+    // Enhanced coordinate validation with bounds checking
     isValidCoordinate(coord) {
-        return coord !== null && coord !== undefined && !isNaN(coord) && isFinite(coord) && coord >= -10000 && coord <= 10000;
+        if (coord === null || coord === undefined || isNaN(coord) || !isFinite(coord)) {
+            return false;
+        }
+        // Allow reasonable coordinate ranges for drawing tools
+        // Expanded range to handle edge cases with zooming and panning
+        return coord >= -50000 && coord <= 50000;
     }
 
     // Drawing tool implementations
@@ -584,7 +760,63 @@ class DrawingTools {
         };
         
         console.log('Starting trendline:', this.currentDrawing);
-        this.renderTrendLine(this.currentDrawing);
+        this.renderTrendLinePreview(this.currentDrawing);
+    }
+
+    renderTrendLinePreview(drawing) {
+        if (!drawing || !drawing.startPoint || !drawing.endPoint) return;
+        
+        // Remove any existing preview
+        this.removeDrawingElement(drawing.id + '_preview');
+        
+        const container = this.chartEngine.container;
+        let svg = container.querySelector('.drawing-svg');
+        if (!svg) {
+            svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('class', 'drawing-svg');
+            svg.style.position = 'absolute';
+            svg.style.top = '0';
+            svg.style.left = '0';
+            svg.style.width = '100%';
+            svg.style.height = '100%';
+            svg.style.pointerEvents = 'none';
+            svg.style.zIndex = '1000';
+            container.appendChild(svg);
+        }
+        
+        try {
+            const mainPanel = this.chartEngine.panels.get('main');
+            if (mainPanel && mainPanel.chart) {
+                const timeScale = mainPanel.chart.timeScale();
+                const priceScale = mainPanel.chart.priceScale('right');
+                const containerRect = this.chartEngine.container.getBoundingClientRect();
+                
+                const x1 = this.safeTimeToCoordinate(timeScale, drawing.startPoint.time);
+                const y1 = this.safePriceToCoordinate(priceScale, drawing.startPoint.price, containerRect.height);
+                const x2 = this.safeTimeToCoordinate(timeScale, drawing.endPoint.time);
+                const y2 = this.safePriceToCoordinate(priceScale, drawing.endPoint.price, containerRect.height);
+                
+                // Only draw if coordinates are valid
+                if (this.isValidCoordinate(x1) && this.isValidCoordinate(y1) && 
+                    this.isValidCoordinate(x2) && this.isValidCoordinate(y2)) {
+                    
+                    const line = this.createSVGElement('line', {
+                        x1, y1, x2, y2,
+                        stroke: drawing.color,
+                        'stroke-width': drawing.lineWidth,
+                        'stroke-dasharray': '5,5', // Dashed for preview
+                        opacity: 0.7,
+                        'pointer-events': 'none'
+                    });
+                    
+                    line.setAttribute('data-drawing-id', drawing.id + '_preview');
+                    line.setAttribute('class', 'trendline-preview');
+                    svg.appendChild(line);
+                }
+            }
+        } catch (error) {
+            console.warn('Trendline preview rendering failed:', error);
+        }
     }
 
     drawHorizontalLine(point) {
@@ -709,7 +941,7 @@ class DrawingTools {
         
         switch (this.currentDrawing.type) {
             case 'trendline':
-                this.renderTrendLine(this.currentDrawing);
+                this.renderTrendLinePreview(this.currentDrawing);
                 break;
             case 'rectangle':
                 this.renderRectangle(this.currentDrawing);
@@ -722,6 +954,12 @@ class DrawingTools {
                 break;
             case 'ray':
                 this.renderRay(this.currentDrawing);
+                break;
+            case 'line':
+                this.renderLineExtended(this.currentDrawing);
+                break;
+            case 'segment':
+                this.renderSegment(this.currentDrawing);
                 break;
             case 'parallel':
                 this.renderParallelChannel(this.currentDrawing);
@@ -753,6 +991,11 @@ class DrawingTools {
         if (!this.currentDrawing) return;
         
         console.log('Finalizing drawing:', this.currentDrawing);
+        
+        // Remove preview for trendline and render final version
+        if (this.currentDrawing.type === 'trendline') {
+            this.removeDrawingElement(this.currentDrawing.id + '_preview');
+        }
         
         // برای fibonacci، وقتی finalize می‌شود باید levels محاسبه شوند
         if (this.currentDrawing.type && this.currentDrawing.type.startsWith('fibonacci-')) {
@@ -805,10 +1048,14 @@ class DrawingTools {
         const x2 = this.safeTimeToCoordinate(timeScale, drawing.endPoint.time);
         const y2 = this.safePriceToCoordinate(priceScale, drawing.endPoint.price, containerRect.height);
         
-        // Validate coordinates
+        // Enhanced coordinate validation
         if (!this.isValidCoordinate(x1) || !this.isValidCoordinate(y1) || 
             !this.isValidCoordinate(x2) || !this.isValidCoordinate(y2)) {
-            console.warn('Invalid trendline coordinates:', {x1, y1, x2, y2});
+            console.warn('Invalid trendline coordinates:', {
+                x1, y1, x2, y2, 
+                startTime: drawing.startPoint.time, 
+                endTime: drawing.endPoint.time
+            });
             return;
         }
         
@@ -824,10 +1071,6 @@ class DrawingTools {
         element.setAttribute('data-drawing-id', drawing.id);
         element.setAttribute('data-drawing-type', 'trendline');
         this.appendToChart(element);
-    }
-
-    isValidCoordinate(coord) {
-        return coord !== null && coord !== undefined && !isNaN(coord) && isFinite(coord);
     }
 
     renderHorizontalLine(drawing) {
@@ -899,30 +1142,57 @@ class DrawingTools {
         const priceScale = mainPanel.chart.priceScale('right');
         const containerRect = this.chartEngine.container.getBoundingClientRect();
         
+        // Enhanced coordinate conversion with validation
         const x1 = this.safeTimeToCoordinate(timeScale, drawing.startPoint.time);
         const y1 = this.safePriceToCoordinate(priceScale, drawing.startPoint.price, containerRect.height);
         const x2 = this.safeTimeToCoordinate(timeScale, drawing.endPoint.time);
         const y2 = this.safePriceToCoordinate(priceScale, drawing.endPoint.price, containerRect.height);
         
+        // Validate all coordinates before proceeding
+        if (!this.isValidCoordinate(x1) || !this.isValidCoordinate(y1) || 
+            !this.isValidCoordinate(x2) || !this.isValidCoordinate(y2)) {
+            console.warn('Invalid rectangle coordinates:', {x1, y1, x2, y2});
+            return;
+        }
+        
+        // Calculate rectangle dimensions with minimum size constraints
+        const rectX = Math.min(x1, x2);
+        const rectY = Math.min(y1, y2);
+        const rectWidth = Math.max(Math.abs(x2 - x1), 2); // Minimum width of 2px
+        const rectHeight = Math.max(Math.abs(y2 - y1), 2); // Minimum height of 2px
+        
         const element = this.createSVGElement('rect', {
-            x: Math.min(x1, x2),
-            y: Math.min(y1, y2),
-            width: Math.abs(x2 - x1),
-            height: Math.abs(y2 - y1),
-            stroke: drawing.color,
+            x: rectX,
+            y: rectY,
+            width: rectWidth,
+            height: rectHeight,
+            stroke: drawing.color || this.colors.rectangle,
             fill: drawing.fillColor || 'transparent',
-            'stroke-width': drawing.lineWidth,
+            'stroke-width': drawing.lineWidth || 2,
             'pointer-events': 'all',
-            'cursor': 'move'
+            'cursor': 'move',
+            opacity: drawing.opacity || 0.8
         });
         
         element.setAttribute('data-drawing-id', drawing.id);
         element.setAttribute('data-drawing-type', 'rectangle');
+        element.setAttribute('data-start-time', drawing.startPoint.time);
+        element.setAttribute('data-end-time', drawing.endPoint.time);
+        element.setAttribute('data-start-price', drawing.startPoint.price);
+        element.setAttribute('data-end-price', drawing.endPoint.price);
+        
         this.appendToChart(element);
     }
 
     renderFibonacciPreview(drawing) {
         if (!drawing || !drawing.startPoint || !drawing.endPoint) return;
+        
+        // Much lighter throttling for smooth drawing experience
+        const now = Date.now();
+        if (this.lastPreviewRender && (now - this.lastPreviewRender) < 16) {
+            return; // 60fps = 16ms between frames
+        }
+        this.lastPreviewRender = now;
         
         this.removeDrawingElement(drawing.id);
         
@@ -945,22 +1215,39 @@ class DrawingTools {
         group.setAttribute('data-drawing-id', drawing.id);
         group.setAttribute('class', 'fibonacci-preview');
         
-        // فقط یک خط ساده بین دو نقطه برای preview
-        const line = this.createSVGLine(
-            drawing.startPoint,
-            drawing.endPoint,
-            '#888',
-            1,
-            'dashed'
-        );
-        line.style.opacity = '0.6';
-        group.appendChild(line);
-        
-        // Preview text - temporarily disabled to avoid coordinate issues
+        // Proper coordinate conversion for smooth preview
+        try {
+            const mainPanel = this.chartEngine.panels.get('main');
+            if (mainPanel && mainPanel.chart) {
+                const timeScale = mainPanel.chart.timeScale();
+                const priceScale = mainPanel.chart.priceScale('right');
+                const containerRect = this.chartEngine.container.getBoundingClientRect();
+                
+                const x1 = this.safeTimeToCoordinate(timeScale, drawing.startPoint.time);
+                const y1 = this.safePriceToCoordinate(priceScale, drawing.startPoint.price, containerRect.height);
+                const x2 = this.safeTimeToCoordinate(timeScale, drawing.endPoint.time);
+                const y2 = this.safePriceToCoordinate(priceScale, drawing.endPoint.price, containerRect.height);
+                
+                // Only draw if coordinates are valid
+                if (this.isValidCoordinate(x1) && this.isValidCoordinate(y1) && 
+                    this.isValidCoordinate(x2) && this.isValidCoordinate(y2)) {
+                    const line = this.createSVGElement('line', {
+                        x1, y1, x2, y2,
+                        stroke: '#888',
+                        'stroke-width': 1,
+                        'stroke-dasharray': '3,3',
+                        opacity: 0.6
+                    });
+                    
+                    group.appendChild(line);
+                }
+            }
+        } catch (error) {
+            // Skip preview on error - don't add broken elements
+            console.warn('Preview rendering failed:', error);
+        }
         
         svg.appendChild(group);
-        
-        console.log('Rendered fibonacci preview for:', drawing.fibType);
     }
 
     renderAdvancedFibonacci(drawing) {
@@ -977,18 +1264,24 @@ class DrawingTools {
             return;
         }
         
+        const settings = drawing.settings || this.fibonacciSettings[drawing.fibType || 'retracement'];
+        
+        // Create group element with proper attributes
+        const group = this.createSVGElement('g');
+        group.setAttribute('data-drawing-id', drawing.id);
+        group.setAttribute('data-drawing-type', 'fibonacci-' + drawing.fibType);
+        group.setAttribute('data-fib-type', drawing.fibType);
+        group.setAttribute('data-start-time', drawing.startPoint.time);
+        group.setAttribute('data-end-time', drawing.endPoint.time);
+        group.setAttribute('data-start-price', drawing.startPoint.price);
+        group.setAttribute('data-end-price', drawing.endPoint.price);
+        group.setAttribute('pointer-events', 'all');
+        group.style.cursor = drawing.editMode ? 'crosshair' : 'move';
+        
+        // Calculate coordinates fresh for current viewport
         const timeScale = mainPanel.chart.timeScale();
         const priceScale = mainPanel.chart.priceScale('right');
         const containerRect = this.chartEngine.container.getBoundingClientRect();
-        
-        const settings = drawing.settings || this.fibonacciSettings[drawing.fibType || 'retracement'];
-        
-        console.log('Advanced Fibonacci drawing data:', {
-            type: drawing.fibType,
-            startPoint: drawing.startPoint,
-            endPoint: drawing.endPoint,
-            settings: settings
-        });
         
         const x1 = this.safeTimeToCoordinate(timeScale, drawing.startPoint.time);
         const y1 = this.safePriceToCoordinate(priceScale, drawing.startPoint.price, containerRect.height);
@@ -998,16 +1291,15 @@ class DrawingTools {
         // Validate coordinates
         if (!this.isValidCoordinate(x1) || !this.isValidCoordinate(y1) || 
             !this.isValidCoordinate(x2) || !this.isValidCoordinate(y2)) {
-            console.warn('Invalid advanced fibonacci coordinates:', {x1, y1, x2, y2});
+            console.warn('Invalid advanced fibonacci coordinates:', {
+                x1, y1, x2, y2,
+                startTime: drawing.startPoint.time,
+                endTime: drawing.endPoint.time,
+                startPrice: drawing.startPoint.price,
+                endPrice: drawing.endPoint.price
+            });
             return;
         }
-        
-        const group = this.createSVGElement('g');
-        group.setAttribute('data-drawing-id', drawing.id);
-        group.setAttribute('data-drawing-type', 'fibonacci-' + drawing.fibType);
-        group.setAttribute('data-fib-type', drawing.fibType);
-        group.setAttribute('pointer-events', 'all');
-        group.style.cursor = drawing.editMode ? 'crosshair' : 'move';
         
         // Render based on Fibonacci type
         switch (drawing.fibType) {
@@ -1043,12 +1335,23 @@ class DrawingTools {
         });
         
         console.log(`Advanced Fibonacci (${drawing.fibType}) created with`, group.children.length, 'elements');
+        
+        // Freeze fibonacci tools to prevent movement during pan/zoom
+        if (drawing.type.includes('fibonacci')) {
+            this.frozenTools.add(drawing.id);
+        }
+        
         this.appendToChart(group);
     }
 
     renderFibonacciRetracement(group, drawing, settings, x1, y1, x2, y2, containerRect) {
         const timeScale = this.chartEngine.panels.get('main').chart.timeScale();
         const priceScale = this.chartEngine.panels.get('main').chart.priceScale('right');
+        
+        // استفاده از قیمت‌های ثابت ذخیره شده در drawing object
+        // این قیمت‌ها نباید تغییر کنند، فقط coordinate هایشان بر اساس zoom/pan به‌روزرسانی می‌شوند
+        const currentStartPrice = drawing.startPoint.price;
+        const currentEndPrice = drawing.endPoint.price;
         
         // Main trend line
         const trendLine = this.createSVGElement('line', {
@@ -1062,7 +1365,7 @@ class DrawingTools {
         
         const customLevels = settings.customLevels || [];
         const levels = [...settings.levels, ...customLevels].sort((a, b) => a - b);
-        const priceRange = drawing.endPoint.price - drawing.startPoint.price;
+        const priceRange = currentEndPrice - currentStartPrice;
         
         // Calculate extension bounds
         const chartWidth = containerRect.width;
@@ -1074,8 +1377,8 @@ class DrawingTools {
             for (let i = 0; i < levels.length - 1; i++) {
                 const level1 = levels[i];
                 const level2 = levels[i + 1];
-                const price1 = drawing.startPoint.price + (priceRange * level1);
-                const price2 = drawing.startPoint.price + (priceRange * level2);
+                const price1 = currentStartPrice + (priceRange * level1);
+                const price2 = currentStartPrice + (priceRange * level2);
                 const y1_bg = this.safePriceToCoordinate(priceScale, price1, containerRect.height);
                 const y2_bg = this.safePriceToCoordinate(priceScale, price2, containerRect.height);
                 
@@ -1095,8 +1398,20 @@ class DrawingTools {
         
         // Fibonacci levels
         levels.forEach((level, index) => {
-            const levelPrice = drawing.startPoint.price + (priceRange * level);
+            const levelPrice = currentStartPrice + (priceRange * level);
             const levelY = this.safePriceToCoordinate(priceScale, levelPrice, containerRect.height);
+            
+            // Debug coordinate conversion (only for first fibonacci)
+            if (level === 0.5 && drawing.id.endsWith('_o6slpphro')) {
+                console.log('Fibonacci level 0.5 debug:', {
+                    startPrice: currentStartPrice,
+                    endPrice: currentEndPrice,
+                    levelPrice: levelPrice,
+                    levelY: levelY,
+                    containerHeight: containerRect.height,
+                    priceRange: priceRange
+                });
+            }
             
             if (!this.isValidCoordinate(levelY)) return;
             
@@ -1188,14 +1503,18 @@ class DrawingTools {
 
     renderFibonacciExtension(group, drawing, settings, x1, y1, x2, y2, containerRect) {
         // Similar to retracement but levels extend beyond 100%
+        // استفاده از قیمت‌های ثابت ذخیره شده در drawing object
+        const currentStartPrice = drawing.startPoint.price;
+        const currentEndPrice = drawing.endPoint.price;
+        
         const customLevels = settings.customLevels || [];
         const levels = [...settings.levels, ...customLevels].sort((a, b) => a - b);
-        const priceRange = drawing.endPoint.price - drawing.startPoint.price;
+        const priceRange = currentEndPrice - currentStartPrice;
         const chartWidth = containerRect.width;
         
         // Extension lines project beyond the main move
         levels.forEach((level) => {
-            const extensionPrice = drawing.endPoint.price + (priceRange * level);
+            const extensionPrice = currentEndPrice + (priceRange * level);
             const extensionY = this.safePriceToCoordinate(
                 this.chartEngine.panels.get('main').chart.priceScale('right'), 
                 extensionPrice, 
@@ -1318,30 +1637,48 @@ class DrawingTools {
         const timeScale = this.chartEngine.panels.get('main').chart.timeScale();
         const baseTimeInterval = Math.abs(drawing.endPoint.time - drawing.startPoint.time);
         
+        // Ensure we have a valid base interval
+        if (!baseTimeInterval || baseTimeInterval <= 0) {
+            console.warn('Invalid base time interval for Fibonacci timezones');
+            return;
+        }
+        
+        // Get visible time range for boundary checking
+        const visibleRange = timeScale.getVisibleRange();
+        
         sequence.forEach((fibNumber, index) => {
+            if (fibNumber === 0) return; // Skip zero
+            
             const timeOffset = baseTimeInterval * fibNumber;
-            const lineTime = drawing.startPoint.time + timeOffset;
+            const lineTime = drawing.startPoint.time + (drawing.endPoint.time > drawing.startPoint.time ? timeOffset : -timeOffset);
+            
+            // Skip if outside reasonable bounds
+            if (visibleRange && (lineTime > visibleRange.to || lineTime < visibleRange.from)) {
+                return;
+            }
+            
             const lineX = this.safeTimeToCoordinate(timeScale, lineTime);
             
-            if (!this.isValidCoordinate(lineX) || lineX > containerRect.width) return;
+            if (!this.isValidCoordinate(lineX) || lineX < 0 || lineX > containerRect.width + 50) return;
             
             const line = this.createSVGElement('line', {
                 x1: lineX,
                 y1: 0,
                 x2: lineX,
                 y2: containerRect.height,
-                stroke: '#A8E6CF',
-                'stroke-width': settings.lineWidth,
-                'stroke-dasharray': '5,5',
+                stroke: drawing.color || '#A8E6CF',
+                'stroke-width': settings.lineWidth || 1,
+                'stroke-dasharray': '3,2',
                 opacity: 0.7
             });
             group.appendChild(line);
             
             if (settings.showLabels) {
                 const text = this.createSVGElement('text', {
-                    x: lineX + 5,
+                    x: lineX + 3,
                     y: 20,
-                    fill: '#A8E6CF',
+                    fill: drawing.color || '#2E7D32',
+                    'font-weight': 'bold',
                     'font-size': 9,
                     'font-family': 'IRANSans, Arial, sans-serif',
                     transform: `rotate(-90, ${lineX + 5}, 20)`
@@ -1354,12 +1691,19 @@ class DrawingTools {
 
     // Legacy method for backward compatibility
     renderFibonacci(drawing) {
+        // Ensure drawing has all required properties
+        if (!drawing.startPoint || !drawing.endPoint) {
+            console.warn('Fibonacci drawing missing start or end point:', drawing);
+            return;
+        }
+        
         if (drawing.type && drawing.type.startsWith('fibonacci-')) {
             this.renderAdvancedFibonacci(drawing);
         } else {
             // Convert legacy fibonacci to advanced retracement
-            drawing.fibType = 'retracement';
-            drawing.settings = this.fibonacciSettings.retracement;
+            drawing.fibType = drawing.fibType || 'retracement';
+            drawing.settings = drawing.settings || this.fibonacciSettings[drawing.fibType] || this.fibonacciSettings.retracement;
+            drawing.type = 'fibonacci-' + drawing.fibType;
             this.renderAdvancedFibonacci(drawing);
         }
     }
@@ -1471,7 +1815,8 @@ class DrawingTools {
                 class: 'drawing-overlay'
             });
             
-            // Set up proper positioning and size
+            // Set up proper positioning and size that sticks to chart
+            const containerRect = this.chartEngine.container.getBoundingClientRect();
             svg.style.cssText = `
                 position: absolute;
                 top: 0;
@@ -1483,6 +1828,10 @@ class DrawingTools {
                 overflow: visible;
             `;
             
+            // Ensure SVG viewport matches container for proper coordinate mapping
+            svg.setAttribute('viewBox', `0 0 ${containerRect.width} ${containerRect.height}`);
+            svg.setAttribute('preserveAspectRatio', 'none');
+            
             // Make sure it's positioned relative to chart container
             if (this.chartEngine.container.style.position !== 'relative' && 
                 this.chartEngine.container.style.position !== 'absolute') {
@@ -1492,6 +1841,10 @@ class DrawingTools {
             this.chartEngine.container.appendChild(svg);
             console.log('Created drawing overlay SVG');
         }
+        
+        // Update SVG viewBox to match current container size for proper scaling
+        const containerRect = this.chartEngine.container.getBoundingClientRect();
+        svg.setAttribute('viewBox', `0 0 ${containerRect.width} ${containerRect.height}`);
         
         // Ensure element allows pointer events if it's interactive
         if (element.hasAttribute('data-drawing-id')) {
@@ -1562,9 +1915,13 @@ class DrawingTools {
     }
 
     deleteSelected() {
-        // In a full implementation, you would track selected tools
-        // For now, this is a placeholder
-        console.log('Delete selected tools');
+        if (this.selectedDrawing) {
+            this.deleteTool(this.selectedDrawing);
+            this.selectedDrawing = null;
+            console.log('Deleted selected drawing');
+        } else {
+            console.log('No drawing selected to delete');
+        }
     }
 
     clearAll() {
@@ -1602,26 +1959,51 @@ class DrawingTools {
         });
     }
 
-    // Persistence
+    // Persistence with symbol-specific storage
     saveToStorage() {
+        // Get current symbol from chart
+        const symbol = this.getCurrentSymbol();
+        if (!symbol) {
+            console.warn('No symbol available for saving drawings');
+            return;
+        }
+        
         const data = {
             tools: Array.from(this.tools.entries()),
             colors: this.colors,
             settings: {
                 snapToPrice: this.snapToPrice,
                 snapToTime: this.snapToTime
-            }
+            },
+            symbol: symbol,
+            timestamp: Date.now()
         };
         
-        localStorage.setItem('chart_drawings', JSON.stringify(data));
+        // Save with symbol-specific key
+        const storageKey = this.getStorageKey(symbol);
+        localStorage.setItem(storageKey, JSON.stringify(data));
+        console.log(`Saved ${this.tools.size} drawings for symbol ${symbol}`);
     }
 
     loadFromStorage() {
         try {
-            const data = JSON.parse(localStorage.getItem('chart_drawings') || '{}');
+            // Get current symbol from chart
+            const symbol = this.getCurrentSymbol();
+            if (!symbol) {
+                console.warn('No symbol available for loading drawings');
+                return;
+            }
             
-            if (data.tools) {
+            const storageKey = this.getStorageKey(symbol);
+            const data = JSON.parse(localStorage.getItem(storageKey) || '{}');
+            
+            // Only load if data exists and matches current symbol
+            if (data.symbol === symbol && data.tools) {
                 this.tools = new Map(data.tools);
+                console.log(`Loaded ${this.tools.size} drawings for symbol ${symbol}`);
+            } else {
+                this.tools = new Map();
+                console.log(`No saved drawings found for symbol ${symbol}`);
             }
             
             if (data.colors) {
@@ -1633,12 +2015,106 @@ class DrawingTools {
                 this.snapToTime = data.settings.snapToTime ?? true;
             }
             
-            // Initial history state
+            // Initial history state and render
             this.addToHistory();
+            this.renderAll();
             
         } catch (error) {
             console.error('Error loading drawings from storage:', error);
+            this.tools = new Map();
         }
+    }
+    
+    // Helper to get current symbol from chart
+    getCurrentSymbol() {
+        // Try to get symbol from chart engine
+        if (this.chartEngine && this.chartEngine.currentSymbol) {
+            return this.chartEngine.currentSymbol;
+        }
+        
+        // Try to get from drawing tools instance
+        if (this.currentSymbol) {
+            return this.currentSymbol;
+        }
+        
+        // Try to get from URL or page context
+        const urlParams = new URLSearchParams(window.location.search);
+        const symbolFromUrl = urlParams.get('symbol');
+        if (symbolFromUrl) {
+            return symbolFromUrl;
+        }
+        
+        // Try to get from page title or other elements
+        const titleElement = document.querySelector('.symbol-title, .stock-symbol, [data-symbol]');
+        if (titleElement) {
+            return titleElement.textContent || titleElement.dataset.symbol;
+        }
+        
+        // Default fallback - use a consistent default
+        return 'default';
+    }
+    
+    // تولید کلید storage با context کامل
+    getStorageKey(symbol = null) {
+        const sym = symbol || this.currentSymbol || 'default';
+        const tf = this.currentTimeframe || '1D';
+        const dt = this.currentDataType || 'unadjusted';
+        return `chart_drawings_${sym}_${tf}_${dt}`;
+    }
+    
+    // Set current symbol
+    setSymbol(symbol) {
+        if (symbol && symbol !== this.currentSymbol) {
+            console.log(`DrawingTools: Symbol changed from ${this.currentSymbol} to ${symbol}`);
+            
+            // ذخیره drawings فعلی قبل از تغییر
+            this.saveToStorage();
+            
+            this.currentSymbol = symbol;
+            // Clear current drawings and load new ones for this symbol
+            this.tools.clear();
+            this.loadFromStorage();
+        }
+    }
+    
+    // Set current timeframe
+    setTimeframe(timeframe) {
+        if (timeframe && timeframe !== this.currentTimeframe) {
+            console.log(`DrawingTools: Timeframe changed from ${this.currentTimeframe} to ${timeframe}`);
+            
+            // ذخیره drawings فعلی قبل از تغییر
+            this.saveToStorage();
+            
+            this.currentTimeframe = timeframe;
+            // Clear current drawings and load new ones for this timeframe
+            this.tools.clear();
+            this.loadFromStorage();
+        }
+    }
+    
+    // Set current data type (adjusted/unadjusted)
+    setDataType(dataType) {
+        if (dataType && dataType !== this.currentDataType) {
+            console.log(`DrawingTools: DataType changed from ${this.currentDataType} to ${dataType}`);
+            
+            // ذخیره drawings فعلی قبل از تغییر
+            this.saveToStorage();
+            
+            this.currentDataType = dataType;
+            // Clear current drawings and load new ones for this data type
+            this.tools.clear();
+            this.loadFromStorage();
+        }
+    }
+    
+    // دریافت context کامل
+    getCurrentContext() {
+        return {
+            symbol: this.currentSymbol,
+            timeframe: this.currentTimeframe,
+            dataType: this.currentDataType,
+            storageKey: this.getStorageKey()
+        };
     }
 
     // Configuration
@@ -1765,6 +2241,12 @@ class DrawingTools {
             case 'ray':
                 this.renderRay(drawing);
                 break;
+            case 'line':
+                this.renderLineExtended(drawing);
+                break;
+            case 'segment':
+                this.renderSegment(drawing);
+                break;
             case 'parallel':
                 this.renderParallelChannel(drawing);
                 break;
@@ -1821,6 +2303,13 @@ class DrawingTools {
         const x2 = this.safeTimeToCoordinate(timeScale, drawing.endPoint.time);
         const y2 = this.safePriceToCoordinate(priceScale, drawing.endPoint.price, containerRect.height);
         
+        // Validate coordinates before proceeding
+        if (!this.isValidCoordinate(x1) || !this.isValidCoordinate(y1) || 
+            !this.isValidCoordinate(x2) || !this.isValidCoordinate(y2)) {
+            console.warn('Invalid triangle coordinates:', {x1, y1, x2, y2});
+            return;
+        }
+        
         const x3 = x1;
         const y3 = y2;
         
@@ -1852,6 +2341,34 @@ class DrawingTools {
             lineStyle: 0
         };
         this.renderRay(this.currentDrawing);
+    }
+
+    startLine(startPoint) {
+        const id = this.generateId('line');
+        this.currentDrawing = {
+            id,
+            type: 'line',
+            startPoint: { ...startPoint },
+            endPoint: { ...startPoint },
+            color: this.colors.line || this.colors.trendline,
+            lineWidth: 2,
+            lineStyle: 0
+        };
+        this.renderLineExtended(this.currentDrawing);
+    }
+
+    startSegment(startPoint) {
+        const id = this.generateId('segment');
+        this.currentDrawing = {
+            id,
+            type: 'segment',
+            startPoint: { ...startPoint },
+            endPoint: { ...startPoint },
+            color: this.colors.segment || this.colors.trendline,
+            lineWidth: 2,
+            lineStyle: 0
+        };
+        this.renderSegment(this.currentDrawing);
     }
 
     renderRay(drawing) {
@@ -1891,6 +2408,98 @@ class DrawingTools {
             element.setAttribute('data-drawing-type', 'ray');
             this.appendToChart(element);
         }
+    }
+
+    renderLineExtended(drawing) {
+        this.removeDrawingElement(drawing.id);
+        
+        const mainPanel = this.chartEngine.panels.get('main');
+        if (!mainPanel) return;
+        
+        const timeScale = mainPanel.chart.timeScale();
+        const priceScale = mainPanel.chart.priceScale('right');
+        const containerRect = this.chartEngine.container.getBoundingClientRect();
+        
+        const x1 = this.safeTimeToCoordinate(timeScale, drawing.startPoint.time);
+        const y1 = this.safePriceToCoordinate(priceScale, drawing.startPoint.price, containerRect.height);
+        const x2 = this.safeTimeToCoordinate(timeScale, drawing.endPoint.time);
+        const y2 = this.safePriceToCoordinate(priceScale, drawing.endPoint.price, containerRect.height);
+        
+        // Extend the line to both sides infinitely
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const length = Math.sqrt(dx * dx + dy * dy);
+        
+        if (length > 0) {
+            const extendedLength = 3000; // Very long extension for infinite line
+            const unitX = dx / length;
+            const unitY = dy / length;
+            
+            // Extend both directions
+            const startX = x1 - (unitX * extendedLength);
+            const startY = y1 - (unitY * extendedLength);
+            const endX = x1 + (unitX * extendedLength);
+            const endY = y1 + (unitY * extendedLength);
+            
+            const element = this.createSVGElement('line', {
+                x1: startX,
+                y1: startY,
+                x2: endX,
+                y2: endY,
+                stroke: drawing.color,
+                'stroke-width': drawing.lineWidth,
+                'stroke-dasharray': this.getStrokeDashArray(drawing.lineStyle),
+                'pointer-events': 'all',
+                'cursor': 'move'
+            });
+            
+            element.setAttribute('data-drawing-id', drawing.id);
+            element.setAttribute('data-drawing-type', 'line');
+            element.setAttribute('data-start-time', drawing.startPoint.time);
+            element.setAttribute('data-end-time', drawing.endPoint.time);
+            element.setAttribute('data-start-price', drawing.startPoint.price);
+            element.setAttribute('data-end-price', drawing.endPoint.price);
+            
+            this.appendToChart(element);
+        }
+    }
+
+    renderSegment(drawing) {
+        this.removeDrawingElement(drawing.id);
+        
+        const mainPanel = this.chartEngine.panels.get('main');
+        if (!mainPanel) return;
+        
+        const timeScale = mainPanel.chart.timeScale();
+        const priceScale = mainPanel.chart.priceScale('right');
+        const containerRect = this.chartEngine.container.getBoundingClientRect();
+        
+        const x1 = this.safeTimeToCoordinate(timeScale, drawing.startPoint.time);
+        const y1 = this.safePriceToCoordinate(priceScale, drawing.startPoint.price, containerRect.height);
+        const x2 = this.safeTimeToCoordinate(timeScale, drawing.endPoint.time);
+        const y2 = this.safePriceToCoordinate(priceScale, drawing.endPoint.price, containerRect.height);
+        
+        // Simple segment - just draw between two points without extension
+        const element = this.createSVGElement('line', {
+            x1,
+            y1,
+            x2,
+            y2,
+            stroke: drawing.color,
+            'stroke-width': drawing.lineWidth,
+            'stroke-dasharray': this.getStrokeDashArray(drawing.lineStyle),
+            'pointer-events': 'all',
+            'cursor': 'move'
+        });
+        
+        element.setAttribute('data-drawing-id', drawing.id);
+        element.setAttribute('data-drawing-type', 'segment');
+        element.setAttribute('data-start-time', drawing.startPoint.time);
+        element.setAttribute('data-end-time', drawing.endPoint.time);
+        element.setAttribute('data-start-price', drawing.startPoint.price);
+        element.setAttribute('data-end-price', drawing.endPoint.price);
+        
+        this.appendToChart(element);
     }
 
     startParallelChannel(startPoint) {
@@ -2054,6 +2663,13 @@ class DrawingTools {
         const y1 = this.safePriceToCoordinate(priceScale, drawing.startPoint.price, containerRect.height);
         const x2 = this.safeTimeToCoordinate(timeScale, drawing.endPoint.time);
         const y2 = this.safePriceToCoordinate(priceScale, drawing.endPoint.price, containerRect.height);
+        
+        // Validate coordinates before proceeding
+        if (!this.isValidCoordinate(x1) || !this.isValidCoordinate(y1) || 
+            !this.isValidCoordinate(x2) || !this.isValidCoordinate(y2)) {
+            console.warn('Invalid ellipse coordinates:', {x1, y1, x2, y2});
+            return;
+        }
         
         const cx = (x1 + x2) / 2;
         const cy = (y1 + y2) / 2;

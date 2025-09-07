@@ -127,11 +127,14 @@ class CurrencyService:
             # Process results
             processed_results = []
             for currency in results:
-                processed_results.append(self._format_currency_data(currency))
+                processed_result = self._format_currency_data(currency)
+                processed_results.append(processed_result)
             
             return processed_results
         except Exception as e:
             print(f"Error searching currencies: {e}")
+            import traceback
+            traceback.print_exc()
             # Fallback to mock data search
             mock_data = self._generate_mock_currencies()
             query_lower = query.lower()
